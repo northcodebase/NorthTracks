@@ -60,7 +60,7 @@ Build for production:
 npm run build
 ```
 
-The built application will be in the dist folder. To package as a Windows installer run:
+The built application will be in the `dist` folder. To package as a Windows installer run:
 
 ```bash
 npm run package
@@ -68,16 +68,12 @@ npm run package
 
 ## Configuration
 
-On first launch, go to Preferences and set your Source Music Folder (the folder NorthTracks will scan) and your Destination Music Folder (where organized music will be copied). NorthTracks stores all application data including library cache, playlists, liked songs, play history, and settings in %AppData%\NorthTracks\.
+On first launch, go to **Preferences** and set your **Source Music Folder** (the folder NorthTracks will scan) and your **Destination Music Folder** (where organized music will be copied). NorthTracks stores all application data including library cache, playlists, liked songs, play history, and settings in `%AppData%\NorthTracks`.
 
 ## Development
 
-The project uses a standard Electron + Vite + React setup. Main process code is in src/main, renderer code is in src/renderer, and the preload script is in src/main/preload.ts. Build scripts are in the scripts folder.
+The project uses a standard Electron + Vite + React setup. Main process code is in `src/main`, renderer code is in `src/renderer`, and the preload script is in `src/main/preload.ts`. Build scripts are in the `scripts` folder.
 
 ## License
 
-MIT License. See LICENSE file for details.
-
-## Contact
-
-mnishdec@gmail.com
+MIT License. See [LICENSE](LICENSE) file for details.
