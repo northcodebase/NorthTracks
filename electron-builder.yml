@@ -1,0 +1,32 @@
+appId: com.northcodebase.northtracks
+productName: NorthTracks
+
+directories:
+  output: dist-release
+
+# Files to include in the packaged app
+files:
+  - dist/**/*
+  - package.json
+
+# Windows target configuration
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icon.ico
+
+# NSIS installer configuration
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: resources/icon.ico
+  uninstallerIcon: resources/icon.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: NorthTracks
+  # Default install dir: C:\Program Files\NorthTracks
+  # (electron-builder uses $PROGRAMFILES\{productName} by default when oneClick: false)
+  perMachine: false
+  allowElevation: true

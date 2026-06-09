@@ -1,0 +1,43 @@
+{
+  "name": "northtracks",
+  "productName": "NorthTracks",
+  "version": "1.0.0",
+  "description": "NorthTracks - Your personal music library manager",
+  "author": "NorthCodeBase",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "build": "node scripts/build.js",
+    "build:win": "npm run build && electron-builder --win",
+    "dist": "npm run build && electron-builder --win",
+    "package": "npm run build && electron-builder",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/manrope": "^5.2.8",
+    "discord-rpc": "^4.0.1",
+    "electron-store": "^11.0.2",
+    "lucide-react": "^0.395.0",
+    "music-metadata": "^11.12.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/discord-rpc": "^4.0.10",
+    "@types/node": "^20.12.12",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "electron": "^30.0.1",
+    "electron-builder": "^24.13.3",
+    "esbuild": "^0.21.4",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11"
+  },
+  "allowScripts": {
+    "lzma-native@8.0.6": true,
+    "electron": true,
+    "esbuild": true
+  }
+}
