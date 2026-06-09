@@ -32,13 +32,36 @@ A local-first music library manager and player for Windows. NorthTracks scans yo
 - music-metadata
 - chokidar
 
+## Installation
+
+Download the latest installer from the [**Releases**](https://github.com/northcodebase/NorthTracks/releases) page and run it. No Node.js, npm, or any other tools required.
+
+```
+NorthTracks Setup x.x.x.exe
+```
+
+Choose your install directory and you're done. NorthTracks will appear in your Start Menu and on your Desktop.
+
+## Configuration
+
+On first launch, go to **Preferences** and set your:
+
+- **Source Music Folder** — the folder NorthTracks will scan for music
+- **Destination Music Folder** — where organized music will be copied
+
+All application data (library cache, playlists, liked songs, play history, and settings) is stored in `%AppData%\NorthTracks`.
+
 ## Requirements
 
-- Windows 10 or Windows 11
-- Node.js 18 or later
-- npm 9 or later
+- Windows 10 or Windows 11 (64-bit)
 
-## Getting Started
+---
+
+## Development
+
+> The following steps are only needed if you want to build or contribute to NorthTracks. Regular users can simply download the installer from Releases.
+
+**Prerequisites:** Node.js 18+, npm 9+
 
 Clone the repository and install dependencies:
 
@@ -60,20 +83,17 @@ Build for production:
 npm run build
 ```
 
-The built application will be in the `dist` folder. To package as a Windows installer run:
+Package as a Windows installer:
 
 ```bash
-npm run package
+npm run build:win
 ```
 
-## Configuration
-
-On first launch, go to **Preferences** and set your **Source Music Folder** (the folder NorthTracks will scan) and your **Destination Music Folder** (where organized music will be copied). NorthTracks stores all application data including library cache, playlists, liked songs, play history, and settings in `%AppData%\NorthTracks`.
-
-## Development
+The installer will be output to `dist-release\`.
 
 The project uses a standard Electron + Vite + React setup. Main process code is in `src/main`, renderer code is in `src/renderer`, and the preload script is in `src/main/preload.ts`. Build scripts are in the `scripts` folder.
 
 ## License
 
 MIT License. See [LICENSE](LICENSE) file for details.
+
