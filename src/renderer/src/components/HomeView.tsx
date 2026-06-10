@@ -1,7 +1,8 @@
-import React from 'react';
-import { Music2, RefreshCw, Play } from 'lucide-react';
+import React, { useRef, useEffect } from 'react';
+import { Music2, RefreshCw, Play, ListMusic } from 'lucide-react';
 import { AppIcon } from './AppIcon';
 import { ArtistLinks } from './ArtistLinks';
+import { useArtistImage } from '../hooks/useArtistImage';
 
 export interface Track {
   filePath: string;
@@ -38,6 +39,8 @@ interface HomeViewProps {
   onNavigateToArtist: (artistName: string) => void;
   /** Map of genre name -> custom cover base64 (set by user in GenreView) */
   customGenreCovers?: Record<string, string>;
+  onNavigateToPlaylists?: () => void;
+  onPlaylistContextMenu?: (e: React.MouseEvent, playlistId: string, playlistName: string, isCustom: boolean) => void;
 }
 
 interface PlaylistItem {
@@ -55,6 +58,32 @@ const formatTime = (secs: number) => {
   return `${m}:${s.toString().padStart(2, '0')}`;
 };
 
+const RecommendationCover: React.FC<{ track: Track }> = ({ track }) => {
+  const { imageUrl } = useArtistImage(track.coverArt ? undefined : track.artist);
+
+  if (track.coverArt) {
+    return (
+      <img
+        src={track.coverArt}
+        alt={track.title}
+        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+      />
+    );
+  }
+
+  if (imageUrl) {
+    return (
+      <img
+        src={imageUrl}
+        alt={track.title}
+        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+      />
+    );
+  }
+
+  return <Music2 size={32} style={{ color: 'var(--text-muted)' }} />;
+};
+
 export const HomeView: React.FC<HomeViewProps> = ({
   onNavigateToGenre,
   onPlayTrack,
@@ -67,7 +96,43 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onOpenPlaylist,
   onNavigateToArtist,
   customGenreCovers = {},
+  onNavigateToPlaylists,
+  onPlaylistContextMenu,
 }) => {
+  const recsScrollRef = useRef<HTMLDivElement>(null);
+  const playlistsScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      if (e.deltaY !== 0) {
+        e.preventDefault();
+        const container = e.currentTarget as HTMLDivElement;
+        if (container) {
+          container.scrollLeft += e.deltaY;
+        }
+      }
+    };
+
+    const recsEl = recsScrollRef.current;
+    const playlistsEl = playlistsScrollRef.current;
+
+    if (recsEl) {
+      recsEl.addEventListener('wheel', handleWheel, { passive: false });
+    }
+    if (playlistsEl) {
+      playlistsEl.addEventListener('wheel', handleWheel, { passive: false });
+    }
+
+    return () => {
+      if (recsEl) {
+        recsEl.removeEventListener('wheel', handleWheel);
+      }
+      if (playlistsEl) {
+        playlistsEl.removeEventListener('wheel', handleWheel);
+      }
+    };
+  }, [tracks.length, recommendations.length, customPlaylists.length]);
+
   // Process top played songs (sorted by play counts)
   const topSongs = [...tracks]
     .sort((a, b) => {
@@ -216,6 +281,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </div>
 
               <div 
+                ref={recsScrollRef}
                 style={{ 
                   display: 'flex', 
                   overflowX: 'auto', 
@@ -249,15 +315,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       onMouseLeave={(e) => e.currentTarget.style.transform = 'none'}
                     >
                       <div style={{ width: '100%', aspectRatio: '1', borderRadius: '8px', overflow: 'hidden', backgroundColor: 'var(--bg-main)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        {track.coverArt ? (
-                          <img
-                            src={track.coverArt}
-                            alt={track.title}
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          />
-                        ) : (
-                          <Music2 size={32} style={{ color: 'var(--text-muted)' }} />
-                        )}
+                        <RecommendationCover track={track} />
                       </div>
                       <div 
                         style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', margin: 0 }}
@@ -283,6 +341,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               Your Playlists
             </h2>
             <div 
+              ref={playlistsScrollRef}
               style={{ 
                 display: 'flex', 
                 overflowX: 'auto', 
@@ -316,6 +375,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     }}
                     onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
                     onMouseLeave={(e) => e.currentTarget.style.transform = 'none'}
+                    onContextMenu={(e) => onPlaylistContextMenu?.(e, playlist.id, playlist.name, playlist.type === 'custom')}
                   >
                     <div style={{ width: '100%', aspectRatio: '1', borderRadius: '8px', overflow: 'hidden', backgroundColor: 'var(--bg-main)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {renderCover(playlist)}
@@ -332,6 +392,56 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   </div>
                 );
               })}
+
+              {/* See All Card */}
+              <div
+                onClick={() => onNavigateToPlaylists?.()}
+                style={{
+                  width: '160px',
+                  minWidth: '160px',
+                  maxWidth: '160px',
+                  padding: '8px',
+                  boxSizing: 'border-box',
+                  background: 'var(--color-background-secondary)',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  transition: 'transform 0.2s ease',
+                  border: 'none',
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                onMouseLeave={(e) => e.currentTarget.style.transform = 'none'}
+              >
+                <div 
+                  style={{ 
+                    width: '100%', 
+                    aspectRatio: '1', 
+                    borderRadius: '8px', 
+                    overflow: 'hidden', 
+                    backgroundColor: 'rgba(255, 255, 255, 0.02)', 
+                    border: '1px dashed var(--border-medium)',
+                    display: 'flex', 
+                    flexDirection: 'column',
+                    alignItems: 'center', 
+                    justifyContent: 'center',
+                    gap: '8px',
+                    color: 'var(--text-secondary)'
+                  }}
+                >
+                  <ListMusic size={32} style={{ color: 'var(--primary, #7c5cbf)' }} />
+                  <span style={{ fontSize: '11px', fontWeight: 600 }}>See All Playlists</span>
+                </div>
+                <div 
+                  style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', margin: 0 }}
+                >
+                  See All
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--color-text-tertiary)', margin: 0 }}>
+                  {allPlaylists.length} collections
+                </div>
+              </div>
             </div>
           </div>
 

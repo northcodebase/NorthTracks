@@ -10,7 +10,8 @@ interface EQPanelProps {
 
 const EQ_BANDS_LABELS = ['32', '64', '125', '250', '500', '1k', '2k', '4k', '8k', '16k'];
 
-const PRESET_MAPPING: { name: string; key: EQPresetName }[] = [
+const PRESET_MAPPING: { name: string; key: EQPresetName | 'AUTO' }[] = [
+  { name: 'Auto (Genre Sync)', key: 'AUTO' },
   { name: 'Flat', key: 'FLAT' },
   { name: 'Bass Boost', key: 'BASS_BOOST' },
   { name: 'Treble Boost', key: 'TREBLE_BOOST' },
@@ -29,12 +30,13 @@ export const EQPanel: React.FC<EQPanelProps> = ({ isOpen, onClose, audioEngine }
     const saved = localStorage.getItem('eq-settings');
     if (saved) {
       try {
-        return JSON.parse(saved).normalization || false;
+        const parsed = JSON.parse(saved);
+        return parsed.normalization !== undefined ? parsed.normalization : true;
       } catch (e) {
-        return false;
+        return true;
       }
     }
-    return false;
+    return true;
   });
 
   // Save settings on changes
@@ -107,7 +109,7 @@ export const EQPanel: React.FC<EQPanelProps> = ({ isOpen, onClose, audioEngine }
             onChange={(e) => {
               const val = e.target.value;
               if (val !== 'CUSTOM') {
-                audioEngine.setPreset(val as EQPresetName);
+                audioEngine.setPreset(val as any);
               }
             }}
             className="eq-preset-select"

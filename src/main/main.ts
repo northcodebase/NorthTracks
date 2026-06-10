@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, net, nativeImage, shell } from 'electron';
+import { autoUpdater } from 'electron-updater';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -310,6 +311,17 @@ async function createWindow(settings?: any) {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+
+  // Setup auto-updater listeners and check for updates
+  autoUpdater.on('update-available', () => {
+    mainWindow?.webContents.send('update-status', 'update-available');
+  });
+
+  autoUpdater.on('update-downloaded', () => {
+    mainWindow?.webContents.send('update-status', 'update-downloaded');
+  });
+
+  autoUpdater.checkForUpdatesAndNotify();
 }
 
 // Window control IPC handlers
@@ -331,6 +343,10 @@ ipcMain.on('window-close', () => {
   mainWindow?.close();
 });
 
+ipcMain.on('restart-app', () => {
+  autoUpdater.quitAndInstall();
+});
+
 // Sync initial state on request
 ipcMain.handle('get-window-state', () => {
   return {
@@ -350,6 +366,24 @@ ipcMain.handle('show-in-explorer', async (_event, filePath: string) => {
     return false;
   }
 });
+
+ipcMain.handle('rename-folder', async (_event, oldPath: string, newPath: string) => {
+  try {
+    if (fs.existsSync(oldPath)) {
+      const parentDir = path.dirname(newPath);
+      if (!fs.existsSync(parentDir)) {
+        fs.mkdirSync(parentDir, { recursive: true });
+      }
+      await fs.promises.rename(oldPath, newPath);
+      return true;
+    }
+    throw new Error('Source folder does not exist');
+  } catch (err) {
+    console.error('Failed to rename folder:', err);
+    throw err;
+  }
+});
+
 
 ipcMain.handle('apply-visual-style', async (_event, styleValue: 'solid' | 'acrylic' | 'glow') => {
   try {
@@ -1184,6 +1218,15 @@ app.whenReady().then(() => {
         return new Response('File not found', { status: 404 });
       }
 
+      const lowerPath = filePath.toLowerCase();
+      let contentType = 'audio/mpeg';
+      if (lowerPath.endsWith('.flac')) contentType = 'audio/flac';
+      else if (lowerPath.endsWith('.wav')) contentType = 'audio/wav';
+      else if (lowerPath.endsWith('.m4a') || lowerPath.endsWith('.mp4')) contentType = 'audio/mp4';
+      else if (lowerPath.endsWith('.png')) contentType = 'image/png';
+      else if (lowerPath.endsWith('.jpg') || lowerPath.endsWith('.jpeg')) contentType = 'image/jpeg';
+      else if (lowerPath.endsWith('.webp')) contentType = 'image/webp';
+
       const range = request.headers.get('range');
       if (range) {
         const stat = fs.statSync(filePath);
@@ -1193,24 +1236,28 @@ app.whenReady().then(() => {
         const chunksize = (end - start) + 1;
         const file = fs.createReadStream(filePath, { start, end });
 
-        const lowerPath = filePath.toLowerCase();
-        let contentType = 'audio/mpeg';
-        if (lowerPath.endsWith('.flac')) contentType = 'audio/flac';
-        else if (lowerPath.endsWith('.wav')) contentType = 'audio/wav';
-        else if (lowerPath.endsWith('.m4a') || lowerPath.endsWith('.mp4')) contentType = 'audio/mp4';
-
         return new Response(file as any, {
           status: 206,
           headers: {
             'Content-Range': `bytes ${start}-${end}/${stat.size}`,
             'Accept-Ranges': 'bytes',
             'Content-Length': chunksize.toString(),
-            'Content-Type': contentType
+            'Content-Type': contentType,
+            'Access-Control-Allow-Origin': '*'
           }
         });
       }
 
-      return net.fetch(pathToFileURL(filePath).toString());
+      const file = fs.createReadStream(filePath);
+      const stat = fs.statSync(filePath);
+      return new Response(file as any, {
+        status: 200,
+        headers: {
+          'Content-Length': stat.size.toString(),
+          'Content-Type': contentType,
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
     } catch (err) {
       console.error('Failed to handle media protocol request:', err);
       return new Response('File not found', { status: 404 });

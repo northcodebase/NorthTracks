@@ -36,7 +36,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onViewChange,
   theme,
   onToggleTheme,
-  likedTracksCount,
   settingsCategory,
   setSettingsCategory,
 }) => {
@@ -451,11 +450,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             >
               <div className="sidebar-icon-wrapper" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: '20px', position: 'relative' }}>
                 <Heart size={20} />
-                {likedTracksCount > 0 && width > 52 && (
-                  <span className="sidebar-liked-badge">
-                    {likedTracksCount}
-                  </span>
-                )}
               </div>
               <span style={labelStyle} className="sidebar-label">Liked Songs</span>
             </div>

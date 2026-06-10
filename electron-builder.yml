@@ -30,3 +30,9 @@ nsis:
   # (electron-builder uses $PROGRAMFILES\{productName} by default when oneClick: false)
   perMachine: false
   allowElevation: true
+
+publish:
+  provider: github
+  owner: northcodebase
+  repo: NorthTracks
+

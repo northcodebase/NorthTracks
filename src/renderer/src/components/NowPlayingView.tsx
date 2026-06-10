@@ -16,6 +16,7 @@ import {
   X
 } from 'lucide-react';
 import { Track } from './LibraryView';
+import { useArtistImage } from '../hooks/useArtistImage';
 
 interface NowPlayingViewProps {
   currentTrack: Track | null;
@@ -121,6 +122,7 @@ export const NowPlayingView: React.FC<NowPlayingViewProps> = ({
   const [activeSidePanel, setActiveSidePanel] = useState<'queue' | 'lyrics' | null>(null);
   const [lyricsData, setLyricsData] = useState<{ type: string; lyrics: string }>({ type: 'none', lyrics: '' });
   const [parsedLyrics, setParsedLyrics] = useState<LyricLine[]>([]);
+  const { imageUrl: artistImageUrl } = useArtistImage(currentTrack?.artist);
   
   const progressBarRef = useRef<HTMLDivElement | null>(null);
   const isDraggingRef = useRef(false);
@@ -399,8 +401,10 @@ export const NowPlayingView: React.FC<NowPlayingViewProps> = ({
       </button>
 
       {/* Dynamic Blurred Ambient Backdrop */}
-      <div className="now-playing-backdrop">
-        {currentTrack?.coverArt && !imageFailed ? (
+      <div className={`now-playing-backdrop ${artistImageUrl ? 'has-artist' : ''}`}>
+        {artistImageUrl ? (
+          <img src={artistImageUrl} alt="" className="now-playing-artist-backdrop-img" />
+        ) : currentTrack?.coverArt && !imageFailed ? (
           <img src={currentTrack.coverArt} alt="" className="now-playing-backdrop-img" />
         ) : (
           <div className="now-playing-backdrop-placeholder" />

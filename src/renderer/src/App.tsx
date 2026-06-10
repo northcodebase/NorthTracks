@@ -27,6 +27,7 @@ import { EQPanel } from './components/EQPanel';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { KeyboardHelpModal } from './components/KeyboardHelpModal';
 import { ContextMenu } from './components/ContextMenu';
+import { PlaylistContextMenu } from './components/PlaylistContextMenu';
 import { TrackInfoModal } from './components/TrackInfoModal';
 import { PlayerBar } from './components/PlayerBar';
 import { PlaylistsView } from './components/PlaylistsView';
@@ -59,54 +60,88 @@ function seededShuffle<T>(array: T[], seed: string): T[] {
 }
 
 // Generate recommendations based on listening history
-function getRecommendations(tracks: Track[], playHistory: Record<string, number>): Track[] {
+// Generate recommendations based on listening history and liked tracks (70% taste / 30% discovery)
+function getRecommendations(
+  tracks: Track[],
+  playHistory: Record<string, number>,
+  likedTracks: string[] = []
+): Track[] {
   if (!tracks || tracks.length === 0) return [];
-  const historyEmpty = !playHistory || Object.keys(playHistory).length === 0 || Object.values(playHistory).reduce((a, b) => a + b, 0) === 0;
+  const historyEmpty = (!playHistory || Object.keys(playHistory).length === 0 || Object.values(playHistory).reduce((a, b) => a + b, 0) === 0) &&
+    (!likedTracks || likedTracks.length === 0);
   if (historyEmpty) {
     return tracks;
   }
 
-  const genrePlayCounts: Record<string, number> = {};
+  // Calculate weights for genres: plays count as 1, likes add +5
+  const genreWeights: Record<string, number> = {};
   tracks.forEach(track => {
-    const count = playHistory[track.filePath] || 0;
+    const playCount = playHistory[track.filePath] || 0;
+    const isLiked = likedTracks.includes(track.filePath) ||
+      (!!track.filePath.split(/[\\/]/).pop()?.toLowerCase() &&
+       likedTracks.some(p => p.split(/[\\/]/).pop()?.toLowerCase() === track.filePath.split(/[\\/]/).pop()?.toLowerCase()));
+
+    const weight = playCount + (isLiked ? 5 : 0);
+
     if (track.genre && Array.isArray(track.genre)) {
       track.genre.forEach(g => {
         const trimmed = g.trim();
         if (trimmed) {
-          genrePlayCounts[trimmed] = (genrePlayCounts[trimmed] || 0) + count;
+          genreWeights[trimmed] = (genreWeights[trimmed] || 0) + weight;
         }
       });
     }
   });
 
-  const topGenres = Object.entries(genrePlayCounts)
+  const weightedGenres = Object.entries(genreWeights)
     .filter(([genre]) => genre.toLowerCase() !== 'unsorted' && genre.toLowerCase() !== 'unknown')
-    .sort((a, b) => b[1] - a[1])
-    .map(([genre]) => genre.toLowerCase());
+    .sort((a, b) => b[1] - a[1]);
 
-  const eligibleTracks = tracks.filter(track => {
-    if (!track.genre || !Array.isArray(track.genre)) return false;
-    return track.genre.some(g => topGenres.includes(g.trim().toLowerCase()));
+  const topGenres = weightedGenres.map(([genre]) => genre.toLowerCase());
+
+  // Split library into taste matching (matching top 3 genres) and discovery (other genres/unheard)
+  const tasteTracks: Track[] = [];
+  const discoveryTracks: Track[] = [];
+
+  tracks.forEach(track => {
+    const matchesTaste = track.genre && Array.isArray(track.genre) &&
+      track.genre.some(g => topGenres.slice(0, 3).includes(g.trim().toLowerCase()));
+
+    if (matchesTaste) {
+      tasteTracks.push(track);
+    } else {
+      discoveryTracks.push(track);
+    }
   });
 
-  eligibleTracks.sort((a, b) => {
-    const countA = playHistory[a.filePath] || 0;
-    const countB = playHistory[b.filePath] || 0;
-    if (countA !== countB) return countA - countB;
-    return a.title.localeCompare(b.title);
+  // Sort taste tracks by play count + like status (popular taste first)
+  tasteTracks.sort((a, b) => {
+    const scoreA = (playHistory[a.filePath] || 0) + (likedTracks.includes(a.filePath) ? 10 : 0);
+    const scoreB = (playHistory[b.filePath] || 0) + (likedTracks.includes(b.filePath) ? 10 : 0);
+    return scoreB - scoreA;
   });
 
-  let recommended = eligibleTracks.slice(0, 8);
+  // Sort discovery tracks by lowest play count first to surface unheard/rare songs
+  discoveryTracks.sort((a, b) => {
+    const playA = playHistory[a.filePath] || 0;
+    const playB = playHistory[b.filePath] || 0;
+    return playA - playB;
+  });
 
-  if (recommended.length < 8) {
-    const extraTracks = tracks.filter(t => !recommended.some(r => r.filePath === t.filePath));
-    extraTracks.sort((a, b) => {
-      const countA = playHistory[a.filePath] || 0;
-      const countB = playHistory[b.filePath] || 0;
-      if (countA !== countB) return countA - countB;
-      return a.title.localeCompare(b.title);
-    });
-    recommended = [...recommended, ...extraTracks.slice(0, 8 - recommended.length)];
+  // Mix 14 taste-matching tracks (70%) and 6 discovery tracks (30%)
+  const targetTasteCount = Math.min(14, tasteTracks.length);
+  const targetDiscoveryCount = 20 - targetTasteCount;
+
+  const selectedTaste = tasteTracks.slice(0, targetTasteCount);
+  const selectedDiscovery = discoveryTracks.slice(0, Math.min(targetDiscoveryCount, discoveryTracks.length));
+
+  let recommended = [...selectedTaste, ...selectedDiscovery];
+
+  // Fallback to fill the rest of the 20 slots if necessary
+  if (recommended.length < 20) {
+    const remaining = tracks.filter(t => !recommended.some(r => r.filePath === t.filePath));
+    remaining.sort((a, b) => (playHistory[a.filePath] || 0) - (playHistory[b.filePath] || 0));
+    recommended = [...recommended, ...remaining.slice(0, 20 - recommended.length)];
   }
 
   return recommended;
@@ -122,6 +157,13 @@ export default function App() {
     track: Track;
     onEditGenre?: () => void;
   } | null>(null);
+  const [playlistContextMenu, setPlaylistContextMenu] = useState<{
+    x: number;
+    y: number;
+    playlistId: string;
+    playlistName: string;
+    isCustom: boolean;
+  } | null>(null);
   const [infoTrack, setInfoTrack] = useState<Track | null>(null);
 
   const [currentView, setCurrentView] = useState<'home' | 'genre' | 'explore' | 'library' | 'catalog' | 'preferences' | 'liked' | 'playlists' | 'terminal' | 'dashboard' | 'artist'>('home');
@@ -136,6 +178,7 @@ export default function App() {
   const [likedArtists, setLikedArtists] = useState<string[]>([]);
   const [backTab, setBackTab] = useState<'home' | 'explore' | 'library' | 'liked' | 'genre'>('explore');
   const [customGenreCovers, setCustomGenreCovers] = useState<Record<string, string>>({});
+  const [updateStatus, setUpdateStatus] = useState<'update-available' | 'update-downloaded' | null>(null);
 
   // Load liked artists on mount
   useEffect(() => {
@@ -174,6 +217,16 @@ export default function App() {
       }
     };
     loadCustomGenreCovers();
+  }, []);
+
+  useEffect(() => {
+    if (window.electronAPI?.onUpdateStatus) {
+      window.electronAPI.onUpdateStatus((_event: any, status: any) => {
+        if (status === 'update-available' || status === 'update-downloaded') {
+          setUpdateStatus(status);
+        }
+      });
+    }
   }, []);
 
   const handleToggleLikeArtist = async (artistName: string) => {
@@ -266,10 +319,11 @@ export default function App() {
         ? settings.cachedLibrary
         : browseLibrary;
       const hist = settings?.playHistory || {};
+      const liked = settings?.likedTracks || [];
       const todayStr = new Date().toDateString();
-      const recList = getRecommendations(tracksList, hist);
+      const recList = getRecommendations(tracksList, hist, liked);
       const newSeed = `${todayStr}_${Date.now()}`;
-      const shuffled = seededShuffle(recList, newSeed).slice(0, 8);
+      const shuffled = seededShuffle(recList, newSeed).slice(0, 20);
       await window.electronAPI?.saveSettings?.({
         dailyRecommendations: {
           generatedDate: todayStr,
@@ -281,6 +335,21 @@ export default function App() {
     } catch (e) {
       console.error('Failed to refresh recommendations:', e);
     }
+  };
+
+  const updateRecommendationsRealtime = (currentPlayCounts: Record<string, number>, currentLiked: string[]) => {
+    const tracksList = browseLibrary.length > 0 ? browseLibrary : libraryTracks;
+    const recList = getRecommendations(tracksList, currentPlayCounts, currentLiked);
+    const todayStr = new Date().toDateString();
+    const newSeed = `${todayStr}_${Date.now()}`;
+    const shuffled = seededShuffle(recList, newSeed).slice(0, 20);
+    setRecommendations(shuffled);
+    window.electronAPI?.saveSettings?.({
+      dailyRecommendations: {
+        generatedDate: todayStr,
+        tracks: shuffled
+      }
+    });
   };
 
   // Custom playlist modal state
@@ -307,8 +376,9 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
-  const [volume, setVolume] = useState(0.8);
-  const [isShuffle, setIsShuffle] = useState(false);
+  const [volume, setVolume] = useState(0.4);
+  const [isShuffle, setIsShuffle] = useState(true);
+  const [playbackHistory, setPlaybackHistory] = useState<Track[]>([]);
   const [repeatMode, setRepeatMode] = useState<'off' | 'all' | 'one'>('off');
   const [isEQOpen, setIsEQOpen] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -348,17 +418,20 @@ export default function App() {
     addLog(`[queue] added to queue: "${track.title}"`);
   };
 
-  const handlePlayTrack = async (track: Track, customQueue?: Track[]) => {
+  const handlePlayTrack = async (track: Track, customQueue?: Track[], isBackNavigation = false) => {
     if (!window.electronAPI?.playTrack) return;
     try {
       if (currentTrack && audioRef.current && currentTrack.filePath !== track.filePath) {
         await updateContinueListening(currentTrack, audioRef.current.currentTime, audioRef.current.duration);
+        if (!isBackNavigation) {
+          setPlaybackHistory(prev => [...prev, currentTrack]);
+        }
       }
-      // Increment play count
       setPlayCounts(prev => {
         const next = { ...prev, [track.filePath]: (prev[track.filePath] || 0) + 1 };
         localStorage.setItem('track-play-counts', JSON.stringify(next));
         window.electronAPI?.saveSettings?.({ playHistory: next });
+        updateRecommendationsRealtime(next, likedTracks);
         return next;
       });
 
@@ -376,19 +449,41 @@ export default function App() {
       addLog(`[player] loading track: "${track.title}" by ${track.artist}`);
       const fileUrl = await window.electronAPI.playTrack(track.filePath);
       setCurrentTrack(track);
+      let trackVolume = 0.4;
+      try {
+        const savedVolumesStr = localStorage.getItem('northtracks-track-volumes') || '{}';
+        const savedVolumes = JSON.parse(savedVolumesStr);
+        if (savedVolumes[track.filePath] !== undefined) {
+          trackVolume = savedVolumes[track.filePath];
+        } else {
+          trackVolume = volume;
+        }
+      } catch (e) {
+        trackVolume = volume;
+      }
+      setVolume(trackVolume);
+
       if (audioRef.current) {
         audioEngine.initialize(audioRef.current);
         audioEngine.resume();
         audioRef.current.src = fileUrl;
         audioRef.current.load();
-        audioRef.current.volume = volume;
+        audioRef.current.volume = trackVolume;
         audioRef.current.play().catch(err => console.error('Audio playback error:', err));
         setIsPlaying(true);
         updateMediaSession(track, true);
 
         // Auto-normalization on track change
         const saved = localStorage.getItem('eq-settings');
-        const normalizationEnabled = saved ? JSON.parse(saved).normalization : false;
+        let normalizationEnabled = true;
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            if (parsed.normalization !== undefined) {
+              normalizationEnabled = parsed.normalization;
+            }
+          } catch (e) {}
+        }
         if (normalizationEnabled) {
           setTimeout(() => {
             if (audioRef.current) {
@@ -541,19 +636,20 @@ export default function App() {
   };
 
   const handlePrevTrack = () => {
-    const queue = currentQueue.length > 0 ? currentQueue : libraryTracks;
-    if (!currentTrack || queue.length === 0) return;
-
-    if (isShuffle) {
-      const randomIndex = Math.floor(Math.random() * queue.length);
-      handlePlayTrack(queue[randomIndex]);
+    if (playbackHistory.length > 0) {
+      const prevTrack = playbackHistory[playbackHistory.length - 1];
+      setPlaybackHistory(prev => prev.slice(0, -1));
+      handlePlayTrack(prevTrack, undefined, true);
       return;
     }
+
+    const queue = currentQueue.length > 0 ? currentQueue : libraryTracks;
+    if (!currentTrack || queue.length === 0) return;
 
     const currentIndex = queue.findIndex(t => t.filePath === currentTrack.filePath);
     if (currentIndex === -1) return;
     const prevIndex = (currentIndex - 1 + queue.length) % queue.length;
-    handlePlayTrack(queue[prevIndex]);
+    handlePlayTrack(queue[prevIndex], undefined, true);
   };
 
   const updateMediaSession = (track: Track, playing: boolean) => {
@@ -656,8 +752,9 @@ export default function App() {
         let recs = settings?.dailyRecommendations;
         if (!recs || recs.generatedDate !== todayStr || !recs.tracks || recs.tracks.length === 0) {
           const hist = settings?.playHistory || {};
-          const recList = getRecommendations(initialTracks, hist);
-          const shuffled = seededShuffle(recList, todayStr).slice(0, 8);
+          const liked = settings?.likedTracks || [];
+          const recList = getRecommendations(initialTracks, hist, liked);
+          const shuffled = seededShuffle(recList, todayStr).slice(0, 20);
           recs = {
             generatedDate: todayStr,
             tracks: shuffled
@@ -706,6 +803,7 @@ export default function App() {
 
     setLikedTracks(updatedLikedTracks);
     await window.electronAPI.saveLikedTracks(updatedLikedTracks);
+    updateRecommendationsRealtime(playCounts, updatedLikedTracks);
   };
 
   const handleToggleDislike = (filePath: string) => {
@@ -845,6 +943,7 @@ export default function App() {
 
   useEffect(() => {
     setPlayerImageFailed(false);
+    audioEngine.onTrackChanged(currentTrack?.genre);
   }, [currentTrack]);
 
   useEffect(() => {
@@ -876,6 +975,9 @@ export default function App() {
         const settings = JSON.parse(saved);
         if (settings.bands) {
           audioEngine.setAllEQBands(settings.bands);
+        }
+        if (settings.preset && settings.preset !== 'CUSTOM') {
+          audioEngine.setPreset(settings.preset, currentTrack?.genre);
         }
         if (settings.reverb !== undefined) {
           audioEngine.setReverb(settings.reverb);
@@ -1124,6 +1226,246 @@ export default function App() {
     }
   };
 
+  const handleRenameGenre = async (oldName: string, newName: string) => {
+    if (!window.electronAPI) return;
+    try {
+      const settings = await window.electronAPI.getSettings();
+      const destDir = settings.destinationFolderPath || 'C:\\Users\\North\\Music';
+      
+      const oldPath = `${destDir}\\${oldName}`;
+      const newPath = `${destDir}\\${newName}`;
+      const oldGenrePrefix = `${destDir}\\${oldName}\\`.replace(/\//g, '\\').toLowerCase();
+      const newGenrePrefix = `${destDir}\\${newName}\\`.replace(/\//g, '\\');
+
+      // 1. Check if the currently playing track belongs to the folder being renamed
+      const isCurrentTrackInFolder = currentTrack && 
+        currentTrack.filePath.replace(/\//g, '\\').toLowerCase().startsWith(oldGenrePrefix);
+      
+      const wasPlaying = isPlaying;
+      const savedTime = audioRef.current ? audioRef.current.currentTime : 0;
+
+      // 2. Pause audio, clear src and load to release file lock on Windows
+      if (isCurrentTrackInFolder && audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+        audioRef.current.load();
+        setIsPlaying(false);
+        addLog(`[player] paused and cleared audio source to release Windows file lock before renaming "${oldName}"`);
+      }
+
+      // 3. Rename folder on disk
+      await window.electronAPI.renameFolder(oldPath, newPath);
+      addLog(`[library] renamed genre folder on disk from "${oldName}" to "${newName}"`);
+
+      // 4. Update custom covers and background keys in settings
+      const updatedSettings: any = {};
+      const oldCoverKey = `custom-genre-cover-${oldName}`;
+      const oldBgKey = `custom-genre-bg-${oldName}`;
+      const newCoverKey = `custom-genre-cover-${newName}`;
+      const newBgKey = `custom-genre-bg-${newName}`;
+
+      if (settings[oldCoverKey]) {
+        updatedSettings[newCoverKey] = settings[oldCoverKey];
+        updatedSettings[oldCoverKey] = null;
+      }
+      if (settings[oldBgKey]) {
+        updatedSettings[newBgKey] = settings[oldBgKey];
+        updatedSettings[oldBgKey] = null;
+      }
+
+      // 5. Update genre overrides in settings
+      const oldOverrides = settings.genreOverrides || {};
+      const newOverrides: Record<string, string> = {};
+      Object.keys(oldOverrides).forEach(filename => {
+        if (oldOverrides[filename] === oldName) {
+          newOverrides[filename] = newName;
+        } else {
+          newOverrides[filename] = oldOverrides[filename];
+        }
+      });
+      updatedSettings.genreOverrides = newOverrides;
+
+      // 6. Update track metadata helper
+      const updateTrack = (t: Track) => {
+        let newFilePath = t.filePath;
+        const normalizedPath = t.filePath.replace(/\//g, '\\');
+        if (normalizedPath.toLowerCase().startsWith(oldGenrePrefix)) {
+          newFilePath = newGenrePrefix + normalizedPath.slice(oldGenrePrefix.length);
+        }
+
+        const newGenre = t.genre 
+          ? t.genre.map(g => g.trim().toLowerCase() === oldName.toLowerCase() ? newName : g)
+          : [newName];
+
+        let newCoverArt = t.coverArt;
+        if (newCoverArt) {
+          const oldPattern = `/${oldName.toLowerCase()}/`;
+          const normalizedCover = newCoverArt.replace(/\\/g, '/');
+          if (normalizedCover.toLowerCase().includes(oldPattern)) {
+            const index = normalizedCover.toLowerCase().indexOf(oldPattern);
+            newCoverArt = newCoverArt.slice(0, index) + `/${newName}/` + newCoverArt.slice(index + oldPattern.length);
+          }
+        }
+
+        return {
+          ...t,
+          filePath: newFilePath,
+          genre: newGenre,
+          coverArt: newCoverArt
+        };
+      };
+
+      const updatedLibrary = libraryTracks.map(updateTrack);
+      const updatedBrowse = browseLibrary.map(updateTrack);
+      const updatedQueue = currentQueue.map(updateTrack);
+      const updatedHistory = playbackHistory.map(updateTrack);
+      const updatedRecently = recentlyPlayed.map(updateTrack);
+      const updatedRecommendations = recommendations.map(updateTrack);
+
+      // 7. Update custom playlists track file paths
+      const updatedPlaylists = playlists.map(pl => ({
+        ...pl,
+        tracks: pl.tracks.map(filePath => {
+          const normalizedPath = filePath.replace(/\//g, '\\');
+          if (normalizedPath.toLowerCase().startsWith(oldGenrePrefix)) {
+            return newGenrePrefix + normalizedPath.slice(oldGenrePrefix.length);
+          }
+          return filePath;
+        })
+      }));
+
+      if (window.electronAPI.savePlaylists) {
+        await window.electronAPI.savePlaylists(updatedPlaylists);
+      }
+
+      // Save library and settings
+      if (window.electronAPI.saveLibrary) {
+        await window.electronAPI.saveLibrary(updatedLibrary);
+      }
+      updatedSettings.cachedLibrary = updatedLibrary;
+      await window.electronAPI.saveSettings(updatedSettings);
+
+      // Update React states
+      setLibraryTracks(updatedLibrary);
+      setBrowseLibrary(updatedBrowse);
+      setCurrentQueue(updatedQueue);
+      setPlaybackHistory(updatedHistory);
+      setRecentlyPlayed(updatedRecently);
+      setRecommendations(updatedRecommendations);
+      setPlaylists(updatedPlaylists);
+      setSelectedGenre(newName);
+
+      let updatedTrack = currentTrack;
+      if (currentTrack) {
+        updatedTrack = updateTrack(currentTrack);
+        setCurrentTrack(updatedTrack);
+      }
+
+      if (customGenreCovers[oldName]) {
+        setCustomGenreCovers(prev => {
+          const next = { ...prev };
+          next[newName] = prev[oldName];
+          delete next[oldName];
+          return next;
+        });
+      }
+
+      addLog(`[library] successfully updated library cache and genre mappings to "${newName}"`);
+
+      // 8. Reload and resume playing track if it was paused to release the lock
+      if (isCurrentTrackInFolder && updatedTrack && audioRef.current) {
+        addLog(`[player] reloading renamed track: "${updatedTrack.filePath}"`);
+        const fileUrl = await window.electronAPI.playTrack(updatedTrack.filePath);
+        audioRef.current.src = fileUrl;
+        audioRef.current.load();
+        audioRef.current.currentTime = savedTime;
+        if (wasPlaying) {
+          audioRef.current.play().catch(err => console.error('Audio playback error after rename:', err));
+          setIsPlaying(true);
+        } else {
+          setIsPlaying(false);
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to rename genre folder:', err);
+      alert(`Failed to rename folder: ${err.message || err}`);
+    }
+  };
+
+  const handlePlaylistContextMenu = (
+    e: React.MouseEvent,
+    playlistId: string,
+    playlistName: string,
+    isCustom: boolean
+  ) => {
+    e.preventDefault();
+    setPlaylistContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      playlistId,
+      playlistName,
+      isCustom
+    });
+  };
+
+  const handlePlayPlaylist = (playlistId: string, isCustom: boolean) => {
+    if (isCustom) {
+      const playlist = playlists.find(p => p.id === playlistId);
+      if (playlist && playlist.tracks.length > 0) {
+        const playlistTracks = playlist.tracks
+          .map(path => libraryTracks.find(t => t.filePath === path))
+          .filter((t): t is Track => !!t);
+        if (playlistTracks.length > 0) {
+          handlePlayTrack(playlistTracks[0], playlistTracks);
+        }
+      }
+    } else {
+      const tracksToSearch = browseLibrary.length > 0 ? browseLibrary : libraryTracks;
+      const genreTracks = tracksToSearch.filter(t => {
+        const g = t.genre && t.genre[0] ? t.genre[0].trim().toLowerCase() : 'unsorted';
+        const target = playlistId.toLowerCase();
+        if (target === 'pop') return g.includes('pop');
+        if (target === 'rock') return g.includes('rock');
+        if (target === 'hip-hop') return g.includes('hip') || g.includes('rap');
+        if (target === 'indian') return g.includes('india') || g.includes('hindi') || g.includes('bollywood') || g.includes('indische') || g.includes('punjabi');
+        if (target === 'electronic') return g.includes('electro') || g.includes('edm') || g.includes('house') || g.includes('techno') || g.includes('dance');
+        if (target === 'soundtracks') return g.includes('soundtrack') || g.includes('ost') || g.includes('score') || g.includes('theme');
+        return g === target;
+      });
+      if (genreTracks.length > 0) {
+        handlePlayTrack(genreTracks[0], genreTracks);
+      }
+    }
+  };
+
+  const handleRenamePlaylistFromMenu = async (playlistId: string, playlistName: string, isCustom: boolean) => {
+    const newName = window.prompt(
+      isCustom ? "Enter new playlist name:" : "Enter new genre folder name:",
+      playlistName
+    );
+    if (!newName) return;
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+
+    if (isCustom) {
+      const updated = playlists.map(pl => {
+        if (pl.id === playlistId) {
+          return { ...pl, name: trimmed };
+        }
+        return pl;
+      });
+      setPlaylists(updated);
+      if (window.electronAPI?.savePlaylists) {
+        await window.electronAPI.savePlaylists(updated);
+      }
+      addLog(`[playlist] renamed custom playlist to "${trimmed}"`);
+    } else {
+      if (trimmed !== playlistName) {
+        await handleRenameGenre(playlistName, trimmed);
+      }
+    }
+  };
+
   const handleEditTrackClick = (track: Track) => {
     setEditingTrack(track);
     setEditTitle(track.title);
@@ -1301,6 +1643,8 @@ export default function App() {
                   onOpenPlaylist={(id) => { setSelectedPlaylistId(id); setCurrentView('playlists'); }}
                   onNavigateToArtist={handleNavigateToArtist}
                   customGenreCovers={customGenreCovers}
+                  onNavigateToPlaylists={() => setCurrentView('playlists')}
+                  onPlaylistContextMenu={handlePlaylistContextMenu}
                 />
               ) : currentView === 'explore' ? (
                 <ExploreView
@@ -1336,6 +1680,7 @@ export default function App() {
                   onTrackContextMenu={handleTrackContextMenu}
                   onNavigateToArtist={handleNavigateToArtist}
                   onCoverChange={handleGenreCoverChange}
+                  onRenameGenre={handleRenameGenre}
                 />
               ) : currentView === 'artist' ? (
                 <ArtistView
@@ -1374,6 +1719,7 @@ export default function App() {
               ) : currentView === 'liked' ? (
                 <LikedView
                   browseLibrary={browseLibrary}
+                  libraryTracks={libraryTracks}
                   likedTracks={likedTracks}
                   onToggleLike={handleToggleLike}
                   onPlayTrack={handlePlayTrack}
@@ -1382,6 +1728,9 @@ export default function App() {
                   onTogglePlay={handleTogglePlay}
                   onBack={() => setCurrentView('library')}
                   onTrackContextMenu={handleTrackContextMenu}
+                  onNavigateToArtist={handleNavigateToArtist}
+                  onAddToQueue={handleAddToQueue}
+                  onEditTrack={handleEditTrackClick}
                 />
               ) : currentView === 'preferences' ? (
                 <SettingsView settingsCategory={settingsCategory} />
@@ -1516,6 +1865,10 @@ export default function App() {
                         }
                       }}
                       setCurrentView={(v) => setCurrentView(v as any)}
+                      onTrackContextMenu={handleTrackContextMenu}
+                      onNavigateToArtist={handleNavigateToArtist}
+                      onOpenPlaylist={setSelectedPlaylistId}
+                      onPlaylistContextMenu={handlePlaylistContextMenu}
                     />
                   )}
 
@@ -1623,6 +1976,16 @@ export default function App() {
               if (audioRef.current) {
                 audioRef.current.volume = vol;
               }
+              if (currentTrack) {
+                try {
+                  const savedVolumesStr = localStorage.getItem('northtracks-track-volumes') || '{}';
+                  const savedVolumes = JSON.parse(savedVolumesStr);
+                  savedVolumes[currentTrack.filePath] = vol;
+                  localStorage.setItem('northtracks-track-volumes', JSON.stringify(savedVolumes));
+                } catch (e) {
+                  console.error('Failed to save track volume:', e);
+                }
+              }
             }}
             isMuted={isMuted}
             setIsMuted={(muted) => {
@@ -1668,6 +2031,7 @@ export default function App() {
       {/* Audio Element */}
       <audio
         ref={audioRef}
+        crossOrigin="anonymous"
         onTimeUpdate={() => {
           if (audioRef.current) {
             setCurrentTime(audioRef.current.currentTime);
@@ -1941,11 +2305,87 @@ export default function App() {
         />
       )}
 
+      {playlistContextMenu && (
+        <PlaylistContextMenu
+          x={playlistContextMenu.x}
+          y={playlistContextMenu.y}
+          playlistId={playlistContextMenu.playlistId}
+          playlistName={playlistContextMenu.playlistName}
+          isCustom={playlistContextMenu.isCustom}
+          onClose={() => setPlaylistContextMenu(null)}
+          onPlay={() => handlePlayPlaylist(playlistContextMenu.playlistId, playlistContextMenu.isCustom)}
+          onRename={() => handleRenamePlaylistFromMenu(playlistContextMenu.playlistId, playlistContextMenu.playlistName, playlistContextMenu.isCustom)}
+          onDelete={() => handleDeletePlaylist(playlistContextMenu.playlistId)}
+        />
+      )}
+
       {infoTrack && (
         <TrackInfoModal
           track={infoTrack}
           onClose={() => setInfoTrack(null)}
         />
+      )}
+
+      {updateStatus && (
+        <div
+          className="update-toast"
+          style={{
+            position: 'absolute',
+            bottom: '100px',
+            right: '24px',
+            background: 'rgba(30, 30, 35, 0.85)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '12px',
+            padding: '16px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '16px',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+            zIndex: 9999,
+            transition: 'all 0.3s ease',
+            color: '#ffffff',
+            maxWidth: '400px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '50%', padding: '8px' }}>
+            <RefreshCw size={18} className="animate-spin-custom" style={{ color: 'var(--primary, #7c5cbf)' }} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 600 }}>App Update</h4>
+            <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'rgba(255, 255, 255, 0.7)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {updateStatus === 'update-downloaded'
+                ? 'New version is downloaded!'
+                : 'Downloading update...'}
+            </p>
+          </div>
+          {updateStatus === 'update-downloaded' && (
+            <button
+              onClick={() => {
+                if (window.electronAPI?.restartApp) {
+                  window.electronAPI.restartApp();
+                }
+              }}
+              style={{
+                background: 'var(--primary, #7c5cbf)',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '8px 14px',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'opacity 0.2s',
+                whiteSpace: 'nowrap'
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.9')}
+              onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
+            >
+              Restart
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

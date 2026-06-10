@@ -18,7 +18,7 @@ export interface AudioEngineState {
   reverbWetMix: number;
   stereoWidth: number;
   contextState: AudioContextState;
-  currentPreset: EQPresetName | 'CUSTOM';
+  currentPreset: EQPresetName | 'CUSTOM' | 'AUTO';
 }
 
 // EQ Presets Definition
@@ -66,7 +66,9 @@ export class AudioEngine {
   private eqBands: number[] = [...FLAT];
   private reverbWetMix = 0.0;
   private stereoWidth = 0.0; // -1 to 1
-  private currentPresetName: EQPresetName | 'CUSTOM' = 'FLAT';
+  private currentPresetName: EQPresetName | 'CUSTOM' | 'AUTO' = 'FLAT';
+  private isAutoMode = false;
+  private currentTrackGenre: string[] | undefined = undefined;
   private listeners: Set<(state: AudioEngineState) => void> = new Set();
 
   constructor() {
@@ -203,6 +205,7 @@ export class AudioEngine {
     if (bandIndex < 0 || bandIndex >= 10) return;
     const clampedGain = Math.max(-12, Math.min(12, gainDb));
     this.eqBands[bandIndex] = clampedGain;
+    this.isAutoMode = false;
     this.currentPresetName = this.detectCurrentPreset();
     if (this.eqFilters[bandIndex] && this.ctx) {
       this.eqFilters[bandIndex].gain.setValueAtTime(clampedGain, this.ctx.currentTime);
@@ -219,22 +222,31 @@ export class AudioEngine {
     for (let i = 0; i < 10; i++) {
       this.eqBands[i] = Math.max(-12, Math.min(12, gains[i]));
     }
+    this.isAutoMode = false;
     this.currentPresetName = this.detectCurrentPreset();
     this.applyEQBands();
     this.emitStateChange();
   }
 
   /**
-   * Sets the EQ Preset by name
-   * @param presetName One of the preset keys
+   * Sets the EQ Preset by name or to AUTO mode.
+   * @param presetName One of the preset keys or 'AUTO'
+   * @param genres Optional genres array to initialize the AUTO mode bands immediately
    */
-  setPreset(presetName: EQPresetName): void {
-    const gains = EQ_PRESETS[presetName];
-    if (gains) {
-      this.eqBands = [...gains];
-      this.currentPresetName = presetName;
-      this.applyEQBands();
-      this.emitStateChange();
+  setPreset(presetName: EQPresetName | 'AUTO', genres?: string[]): void {
+    if (presetName === 'AUTO') {
+      this.isAutoMode = true;
+      this.currentPresetName = 'AUTO';
+      this.applyAutoPresetForGenre(genres || this.currentTrackGenre);
+    } else {
+      this.isAutoMode = false;
+      const gains = EQ_PRESETS[presetName];
+      if (gains) {
+        this.eqBands = [...gains];
+        this.currentPresetName = presetName;
+        this.applyEQBands();
+        this.emitStateChange();
+      }
     }
   }
 
@@ -377,7 +389,8 @@ export class AudioEngine {
     this.listeners.forEach(listener => listener(state));
   }
 
-  private detectCurrentPreset(): EQPresetName | 'CUSTOM' {
+  private detectCurrentPreset(): EQPresetName | 'CUSTOM' | 'AUTO' {
+    if (this.isAutoMode) return 'AUTO';
     const keys = Object.keys(EQ_PRESETS) as EQPresetName[];
     for (const key of keys) {
       const presetGains = EQ_PRESETS[key];
@@ -391,6 +404,44 @@ export class AudioEngine {
       if (matches) return key;
     }
     return 'CUSTOM';
+  }
+
+  /**
+   * Called when the current track changes in the application.
+   * Enables auto EQ preset selection dynamically according to track genre metadata.
+   */
+  onTrackChanged(genres: string[] | undefined): void {
+    this.currentTrackGenre = genres;
+    if (this.isAutoMode) {
+      this.applyAutoPresetForGenre(genres);
+    }
+  }
+
+  private matchGenreToPreset(genres: string[] | undefined): EQPresetName {
+    if (!genres || genres.length === 0) return 'FLAT';
+    for (const g of genres) {
+      const clean = g.trim().toLowerCase();
+      if (clean.includes('pop')) return 'POP';
+      if (clean.includes('rock') || clean.includes('metal')) return 'ROCK';
+      if (clean.includes('classical') || clean.includes('classic') || clean.includes('instrumental') || clean.includes('orchestra')) return 'CLASSICAL';
+      if (clean.includes('hip') || clean.includes('rap') || clean.includes('rb') || clean.includes('r&b')) return 'HIP_HOP';
+      if (clean.includes('electro') || clean.includes('edm') || clean.includes('electronic') || clean.includes('house') || clean.includes('techno') || clean.includes('dance') || clean.includes('trance')) return 'ELECTRONIC';
+      if (clean.includes('acoustic') || clean.includes('folk') || clean.includes('country') || clean.includes('singer')) return 'ACOUSTIC';
+      if (clean.includes('vocal') || clean.includes('acapella') || clean.includes('speech') || clean.includes('podcast')) return 'VOCAL';
+      if (clean.includes('bass')) return 'BASS_BOOST';
+      if (clean.includes('treble')) return 'TREBLE_BOOST';
+    }
+    return 'FLAT';
+  }
+
+  private applyAutoPresetForGenre(genres: string[] | undefined): void {
+    const matchedPreset = this.matchGenreToPreset(genres);
+    const gains = EQ_PRESETS[matchedPreset];
+    if (gains) {
+      this.eqBands = [...gains];
+      this.applyEQBands();
+      this.emitStateChange();
+    }
   }
 
   /**

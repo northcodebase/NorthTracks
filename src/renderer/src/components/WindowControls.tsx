@@ -9,6 +9,8 @@ interface ElectronAPI {
   closeWindow: () => void;
   getWindowState: () => Promise<{ isMaximized: boolean }>;
   onWindowStateChanged: (callback: (state: { isMaximized: boolean }) => void) => () => void;
+  restartApp: () => void;
+  onUpdateStatus: (cb: (event: any, message: string) => void) => void;
   [key: string]: any;
 }
 

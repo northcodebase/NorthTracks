@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, Play, Heart, Music2, Clock, MoreVertical, Shuffle } from 'lucide-react';
+import { ChevronLeft, Play, Heart, Music2, Clock, MoreVertical, Shuffle, Pencil } from 'lucide-react';
 import { Track } from './ExploreView';
 import { ArtistLinks } from './ArtistLinks';
 
@@ -33,11 +33,39 @@ export const GenreView: React.FC<GenreViewProps> = ({
   onTrackContextMenu,
   onNavigateToArtist,
   onCoverChange,
+  onRenameGenre,
 }) => {
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [customCover, setCustomCover] = useState<string | null>(null);
   const [customBg, setCustomBg] = useState<string | null>(null);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editingNameValue, setEditingNameValue] = useState(genre);
+
+  useEffect(() => {
+    setEditingNameValue(genre);
+  }, [genre]);
+
+  const handleNameSave = () => {
+    const trimmed = editingNameValue.trim();
+    if (trimmed && trimmed !== genre) {
+      onRenameGenre?.(genre, trimmed);
+    }
+    setIsEditingName(false);
+  };
+
+  const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleNameSave();
+    } else if (e.key === 'Escape') {
+      setEditingNameValue(genre);
+      setIsEditingName(false);
+    }
+  };
+
+  const handleNameBlur = () => {
+    handleNameSave();
+  };
 
   useEffect(() => {
     const loadCustomCover = async () => {
@@ -292,10 +320,64 @@ export const GenreView: React.FC<GenreViewProps> = ({
           </div>
 
           {/* Title and Metadata */}
-          <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-            <h1 style={{ fontSize: '48px', fontWeight: 800, color: 'white', margin: 0, lineHeight: 1.1 }}>
-              {genre}
-            </h1>
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, width: '100%' }}>
+              {isEditingName ? (
+                <input
+                  type="text"
+                  value={editingNameValue}
+                  onChange={(e) => setEditingNameValue(e.target.value)}
+                  onKeyDown={handleNameKeyDown}
+                  onBlur={handleNameBlur}
+                  autoFocus
+                  style={{
+                    fontSize: '48px',
+                    fontWeight: 800,
+                    color: 'white',
+                    background: 'transparent',
+                    border: 'none',
+                    borderBottom: '2px solid var(--primary)',
+                    outline: 'none',
+                    width: '100%',
+                    padding: 0,
+                    margin: 0,
+                    fontFamily: 'inherit',
+                    lineHeight: 1.1
+                  }}
+                />
+              ) : (
+                <>
+                  <h1 style={{ fontSize: '48px', fontWeight: 800, color: 'white', margin: 0, lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {genre}
+                  </h1>
+                  <button
+                    onClick={() => {
+                      setEditingNameValue(genre);
+                      setIsEditingName(true);
+                    }}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'rgba(255, 255, 255, 0.6)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '8px',
+                      borderRadius: '50%',
+                      transition: 'all 0.2s',
+                      flexShrink: 0
+                    }}
+                    className="rename-btn"
+                    title="Rename Genre Folder"
+                    onMouseEnter={(e) => e.currentTarget.style.color = 'white'}
+                    onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255, 255, 255, 0.6)'}
+                  >
+                    <Pencil size={20} />
+                  </button>
+                </>
+              )}
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '12px' }}>
               <span style={{ fontSize: '14px', color: 'rgba(255, 255, 255, 0.8)', fontWeight: 500 }}>
                 {tracks.length} {tracks.length === 1 ? 'song' : 'songs'}

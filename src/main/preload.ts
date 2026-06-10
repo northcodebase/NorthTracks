@@ -74,4 +74,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     };
   },
   writeTrackMetadata: (filePath: string, tags: object) => ipcRenderer.invoke('write-track-metadata', filePath, tags),
+  restartApp: () => ipcRenderer.send('restart-app'),
+  onUpdateStatus: (cb: (event: any, message: string) => void) => ipcRenderer.on('update-status', cb),
+  renameFolder: (oldPath: string, newPath: string) => ipcRenderer.invoke('rename-folder', oldPath, newPath),
 });
+

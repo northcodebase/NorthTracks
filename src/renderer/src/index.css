@@ -3641,6 +3641,21 @@ h6 {
   filter: blur(50px) saturate(180%) !important;
 }
 
+.now-playing-backdrop.has-artist {
+  opacity: 0.35 !important;
+}
+
+.now-playing-artist-backdrop-img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  filter: blur(4px) brightness(0.8) !important;
+  transition: opacity 0.5s ease !important;
+}
+
 .now-playing-main-layout {
   display: flex;
   flex: 1;
@@ -4463,10 +4478,10 @@ h6 {
   position: fixed;
   z-index: 99999;
   width: 220px;
-  background-color: var(--color-background-primary);
-  border-radius: var(--border-radius-lg);
+  background-color: var(--bg-surface) !important;
+  border-radius: 8px !important;
   border: 0.5px solid var(--color-border-tertiary);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2) !important;
   padding: 4px 0;
   font-family: inherit;
   user-select: none;
@@ -4498,7 +4513,7 @@ h6 {
 }
 
 .context-menu-item:hover {
-  background-color: var(--color-background-secondary);
+  background-color: var(--bg-card-hover) !important;
 }
 
 .context-menu-item-icon {
@@ -4544,10 +4559,10 @@ h6 {
   top: -4px;
   z-index: 100000;
   width: 200px;
-  background-color: var(--color-background-primary);
-  border-radius: var(--border-radius-lg);
+  background-color: var(--bg-surface) !important;
+  border-radius: 8px !important;
   border: 0.5px solid var(--color-border-tertiary);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2) !important;
   padding: 4px 0;
 }
 
@@ -5068,4 +5083,20 @@ h6 {
 
 .animate-spin-custom {
   animation: spin 1s linear infinite;
+}
+
+/* --- Update Toast Notification --- */
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.update-toast {
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }

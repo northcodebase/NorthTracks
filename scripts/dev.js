@@ -52,7 +52,7 @@ async function start() {
     bundle: true,
     platform: 'node',
     target: 'node16',
-    external: ['electron', 'music-metadata', 'electron-store'],
+    external: ['electron', 'music-metadata', 'electron-store', 'electron-updater'],
     outfile: path.resolve(__dirname, '../dist/main/preload.js'),
   });
   await preloadCtx.watch();
@@ -64,7 +64,7 @@ async function start() {
     bundle: true,
     platform: 'node',
     target: 'node16',
-    external: ['electron', 'music-metadata', 'electron-store'],
+    external: ['electron', 'music-metadata', 'electron-store', 'electron-updater'],
     outfile: path.resolve(__dirname, '../dist/main/main.js'),
     plugins: [
       {

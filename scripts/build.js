@@ -14,7 +14,7 @@ async function build() {
     bundle: true,
     platform: 'node',
     target: 'node16',
-    external: ['electron', 'music-metadata', 'electron-store'],
+    external: ['electron', 'music-metadata', 'electron-store', 'electron-updater'],
     outfile: path.resolve(__dirname, '../dist/main/main.js'),
     minify: true,
   });
@@ -25,7 +25,7 @@ async function build() {
     bundle: true,
     platform: 'node',
     target: 'node16',
-    external: ['electron', 'music-metadata', 'electron-store'],
+    external: ['electron', 'music-metadata', 'electron-store', 'electron-updater'],
     outfile: path.resolve(__dirname, '../dist/main/preload.js'),
     minify: true,
   });
