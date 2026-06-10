@@ -12,6 +12,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimize: () => ipcRenderer.send('window-minimize'),
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
+  minimizeWindow: () => ipcRenderer.send('window-minimize'),
+  maximizeWindow: () => ipcRenderer.send('window-maximize'),
+  closeWindow: () => ipcRenderer.send('window-close'),
   getWindowState: () => ipcRenderer.invoke('get-window-state'),
   scanLibrary: (sourceFolder: string) => ipcRenderer.invoke('scan-library', sourceFolder),
   organizeLibrary: (tracks: any[]) => ipcRenderer.invoke('organize-library', tracks),
@@ -51,7 +54,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clearLibraryCache: () => ipcRenderer.invoke('clear-library-cache'),
   resetSettings: () => ipcRenderer.invoke('reset-settings'),
   deleteOrganizedMusic: () => ipcRenderer.invoke('delete-organized-music'),
-  updatePlaybackState: (isPlaying: boolean, track?: { title: string; artist: string; album: string; coverArt?: string }) => 
+  updatePlaybackState: (isPlaying: boolean, track?: { title: string; artist: string; album: string; coverArt?: string }) =>
     ipcRenderer.invoke('update-playback-state', isPlaying, track),
   onThumbarControl: (callback: (action: string) => void) => {
     const listener = (_event: any, action: string) => callback(action);
@@ -70,4 +73,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeListener('visual-style', listener);
     };
   },
+  writeTrackMetadata: (filePath: string, tags: object) => ipcRenderer.invoke('write-track-metadata', filePath, tags),
 });

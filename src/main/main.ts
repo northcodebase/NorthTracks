@@ -4,6 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import crypto from 'crypto';
 import { pathToFileURL } from 'url';
+import NodeID3 from 'node-id3';
 import { scanLibrary, findFolderImage, getAudioFiles, limitConcurrency } from './scanner';
 import { organizeLibrary, clearGenreMapCache, normalizeGenreName, reorganizeFolders } from './organizer';
 import { getSettings, saveSettings } from './settings';
@@ -147,7 +148,7 @@ async function createWindow(settings?: any) {
   try {
     const activeSettings = settings || await getSettings();
     resolvedStyle = activeSettings.visualStyle || 'solid';
-    
+
     // Windows 11 Build number check
     const isWin11 = getWindowsBuildNumber() >= 22000;
     if ((resolvedStyle === 'acrylic' || resolvedStyle === 'glow') && !isWin11) {
@@ -189,10 +190,10 @@ async function createWindow(settings?: any) {
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return;
-    const ctrl  = input.control || input.meta; // meta = Cmd on macOS
-    const shift  = input.shift;
-    const alt    = input.alt;
-    const k      = input.key.toLowerCase();
+    const ctrl = input.control || input.meta; // meta = Cmd on macOS
+    const shift = input.shift;
+    const alt = input.alt;
+    const k = input.key.toLowerCase();
 
     // DevTools — Ctrl+Shift+I / Ctrl+Shift+J / Ctrl+Shift+C / F12
     if ((ctrl && shift && (k === 'i' || k === 'j' || k === 'c')) || k === 'f12') {
@@ -631,7 +632,7 @@ ipcMain.handle('save-settings', async (_event, settings: any) => {
         }
       }
     }
-    
+
     // Dynamic Discord RPC update on settings change
     if (result.discordEnabled) {
       initializeDiscordRpc();
@@ -774,7 +775,7 @@ ipcMain.handle('delete-file', async (_event, filePath: string) => {
 // Delete source files IPC handler
 ipcMain.handle('delete-source-files', async (_, filePaths: string[]) => {
   const results = { deleted: 0, failed: 0, errors: [] as string[] }
-  
+
   for (const filePath of filePaths) {
     try {
       if (fs.existsSync(filePath)) {
@@ -786,7 +787,7 @@ ipcMain.handle('delete-source-files', async (_, filePaths: string[]) => {
       results.errors.push(`Failed to delete: ${filePath}`)
     }
   }
-  
+
   return results
 })
 
@@ -810,6 +811,97 @@ ipcMain.handle('delete-organized-music', async () => {
   fs.mkdirSync(destPath, { recursive: true })
   return true
 })
+
+ipcMain.handle('write-track-metadata', async (_event, filePath: string, tags: any) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) {
+      return { success: false, error: 'File does not exist' };
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.flac' || ext === '.m4a') {
+      return { success: false, error: 'Format not yet supported' };
+    }
+
+    if (ext !== '.mp3') {
+      return { success: false, error: `Unsupported file format: ${ext}` };
+    }
+
+    const id3Tags: any = {};
+
+    if (tags.title !== undefined) id3Tags.title = tags.title;
+    if (tags.artist !== undefined) id3Tags.artist = tags.artist;
+    if (tags.album !== undefined) id3Tags.album = tags.album;
+    if (tags.genre !== undefined) {
+      id3Tags.genre = Array.isArray(tags.genre) ? tags.genre.join(', ') : tags.genre;
+    }
+
+    if (tags.image !== undefined && tags.image !== null) {
+      try {
+        let mime = 'image/jpeg';
+        let buffer: Buffer | null = null;
+
+        if (typeof tags.image === 'string') {
+          if (tags.image.startsWith('data:')) {
+            const match = tags.image.match(/^data:([^;]+);base64,(.+)$/);
+            if (match) {
+              mime = match[1];
+              buffer = Buffer.from(match[2], 'base64');
+            }
+          } else if (tags.image.startsWith('media://') || tags.image.startsWith('file://')) {
+            const localPath = getFilePathFromMediaUrl(tags.image);
+            if (localPath && fs.existsSync(localPath)) {
+              buffer = fs.readFileSync(localPath);
+              mime = localPath.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+            }
+          } else if (fs.existsSync(tags.image)) {
+            buffer = fs.readFileSync(tags.image);
+            mime = tags.image.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+          } else {
+            // Try raw base64 string
+            try {
+              buffer = Buffer.from(tags.image, 'base64');
+              if (buffer.length > 4) {
+                if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+                  mime = 'image/png';
+                } else {
+                  mime = 'image/jpeg';
+                }
+              }
+            } catch (e) {
+              console.error('Failed to parse raw base64 string:', e);
+            }
+          }
+        }
+
+        if (buffer) {
+          id3Tags.image = {
+            mime,
+            type: {
+              id: 3,
+              name: 'front cover'
+            },
+            description: 'Cover Art',
+            imageBuffer: buffer
+          };
+        }
+      } catch (imageErr: any) {
+        console.error('Error processing cover art image tag:', imageErr);
+      }
+    }
+
+    // Update tags on the mp3 file
+    const success = NodeID3.update(id3Tags, filePath);
+    if (success) {
+      return { success: true };
+    } else {
+      return { success: false, error: 'Failed to write ID3 tags' };
+    }
+  } catch (err: any) {
+    console.error('Error in write-track-metadata handler:', err);
+    return { success: false, error: err.message || String(err) };
+  }
+});
 
 let currentPlayingTrack: any = null;
 

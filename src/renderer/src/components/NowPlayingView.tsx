@@ -12,7 +12,8 @@ import {
   Heart,
   ListMusic,
   FileText,
-  Share2
+  Share2,
+  X
 } from 'lucide-react';
 import { Track } from './LibraryView';
 
@@ -124,15 +125,23 @@ export const NowPlayingView: React.FC<NowPlayingViewProps> = ({
   const progressBarRef = useRef<HTMLDivElement | null>(null);
   const isDraggingRef = useRef(false);
   const lyricContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // States & Refs for Close Button and Drag-Down Dismissal
+  const [isCloseHovered, setIsCloseHovered] = useState(false);
+  const [dragY, setDragY] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const startYRef = useRef(0);
+  const dragYRef = useRef(0);
  
   // Reset image error state and load lyrics when track changes
   useEffect(() => {
     setImageFailed(false);
     if (currentTrack) {
-      if (window.electronAPI?.getLyrics) {
-        window.electronAPI.getLyrics(currentTrack.filePath).then((data) => {
+      const electronAPI = (window as any).electronAPI;
+      if (electronAPI?.getLyrics) {
+        electronAPI.getLyrics(currentTrack.filePath).then((data: any) => {
           setLyricsData(data);
-        }).catch((err) => {
+        }).catch((err: any) => {
           console.error('Failed to load lyrics:', err);
           setLyricsData({ type: 'none', lyrics: '' });
         });
@@ -216,6 +225,83 @@ export const NowPlayingView: React.FC<NowPlayingViewProps> = ({
     };
   }, [duration]);
 
+  // Escape key to close
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        handleClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  // Drag down gesture handlers and event binding
+  const handleStart = (clientY: number, target: HTMLElement) => {
+    const isInteractive = target.closest(
+      'button, input, [role="button"], .now-playing-side-panel, .now-playing-progress-container, .now-playing-controls-row-centered, .now-playing-action-row-centered, .now-playing-seek-section-centered'
+    );
+    if (isInteractive) return;
+
+    setIsDragging(true);
+    startYRef.current = clientY;
+    dragYRef.current = 0;
+  };
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const deltaY = e.clientY - startYRef.current;
+      if (deltaY > 0) {
+        setDragY(deltaY);
+        dragYRef.current = deltaY;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length > 0) {
+        const deltaY = e.touches[0].clientY - startYRef.current;
+        if (deltaY > 0) {
+          setDragY(deltaY);
+          dragYRef.current = deltaY;
+        }
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      if (dragYRef.current > 80) {
+        handleClose();
+      }
+      setDragY(0);
+      dragYRef.current = 0;
+    };
+
+    const handleTouchEnd = () => {
+      setIsDragging(false);
+      if (dragYRef.current > 80) {
+        handleClose();
+      }
+      setDragY(0);
+      dragYRef.current = 0;
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('touchmove', handleTouchMove, { passive: true });
+    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('touchend', handleTouchEnd);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [isDragging]);
+
   const formatTime = (secs: number) => {
     if (isNaN(secs) || secs === Infinity || secs <= 0) return '0:00';
     const m = Math.floor(secs / 60);
@@ -251,11 +337,67 @@ export const NowPlayingView: React.FC<NowPlayingViewProps> = ({
   const isLiked = currentTrack && (likedTracks.includes(currentTrack.filePath) || 
     (!!currentBasename && likedTracks.some(p => p.split(/[\\/]/).pop()?.toLowerCase() === currentBasename)));
 
+  // Styles for custom elements
+  const pillStyle: React.CSSProperties = {
+    width: '36px',
+    height: '4px',
+    borderRadius: '2px',
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    margin: '12px auto 0 auto',
+    cursor: isDragging ? 'grabbing' : 'grab',
+    position: 'relative',
+    zIndex: 10,
+    flexShrink: 0
+  };
+
+  const closeButtonStyle: React.CSSProperties = {
+    position: 'fixed',
+    top: '20px',
+    right: '24px',
+    zIndex: 9999,
+    width: '36px',
+    height: '36px',
+    borderRadius: '50%',
+    backgroundColor: isCloseHovered ? 'rgba(0, 0, 0, 0.5)' : 'rgba(0, 0, 0, 0.3)',
+    color: '#ffffff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: 'none',
+    cursor: 'pointer',
+    transition: 'background-color 0.2s ease',
+  };
+
   return (
     <div 
       className={`now-playing-overlay ${isOpen ? 'open' : ''}`}
       onTransitionEnd={handleTransitionEnd}
+      style={{
+        transform: isOpen ? `translateY(${dragY}px)` : 'translateY(100%)',
+        transition: isDragging ? 'none' : 'transform 0.4s cubic-bezier(0.32, 0.72, 0, 1)',
+        userSelect: isDragging ? 'none' : 'auto',
+      }}
+      onMouseDown={(e) => handleStart(e.clientY, e.target as HTMLElement)}
+      onTouchStart={(e) => {
+        if (e.touches.length > 0) {
+          handleStart(e.touches[0].clientY, e.target as HTMLElement);
+        }
+      }}
     >
+      {/* Pill Drag Handle Indicator */}
+      <div style={pillStyle} />
+
+      {/* Fixed Close Button */}
+      <button 
+        style={closeButtonStyle}
+        onClick={handleClose}
+        onMouseEnter={() => setIsCloseHovered(true)}
+        onMouseLeave={() => setIsCloseHovered(false)}
+        title="Close"
+      >
+        <X size={20} />
+      </button>
+
       {/* Dynamic Blurred Ambient Backdrop */}
       <div className="now-playing-backdrop">
         {currentTrack?.coverArt && !imageFailed ? (
@@ -265,13 +407,9 @@ export const NowPlayingView: React.FC<NowPlayingViewProps> = ({
         )}
       </div>
 
-      {/* Top Navigation Bar */}
-      <div className="now-playing-header">
-        <button className="now-playing-close-btn" onClick={handleClose} title="Dismiss">
-          <ChevronDown size={24} />
-        </button>
+      {/* Centered Top Header Title */}
+      <div className="now-playing-header" style={{ justifyContent: 'center' }}>
         <span className="now-playing-title-label">Now Playing</span>
-        <div style={{ width: '40px' }} />
       </div>
 
       {/* Centered Main Area */}

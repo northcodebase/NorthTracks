@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AppIcon } from './AppIcon';
+import { ArtistLinks } from './ArtistLinks';
 import { 
-  Folder, 
+  FolderOpen,
+  FolderSearch,
   Search, 
   Settings as SettingsIcon, 
   RefreshCw, 
@@ -14,7 +16,9 @@ import {
   FolderSync,
   Heart,
   MoreVertical,
-  Trash2
+  Trash2,
+  Pencil,
+  Check
 } from 'lucide-react';
 
 export interface Track {
@@ -66,30 +70,31 @@ const detectDuplicates = (tracksList: Track[]): Track[] => {
 interface LibraryViewProps {
   tracks: Track[];
   setTracks: React.Dispatch<React.SetStateAction<Track[]>>;
-  searchQuery: string;
-  onSearchChange: (query: string) => void;
   onPlayTrack?: (track: Track, queue?: Track[]) => void;
-  currentlyPlayingPath?: string;
   likedTracks: string[];
   onToggleLike: (filePath: string) => void;
   onEditTrack?: (track: Track) => void;
   onAddToQueue?: (track: Track) => void;
   onTrackContextMenu?: (e: React.MouseEvent, track: Track, onEditGenre?: () => void) => void;
+  hasScannedInSession: boolean;
+  setHasScannedInSession: (val: boolean) => void;
+  onNavigateToArtist: (artistName: string) => void;
 }
 
 export const LibraryView: React.FC<LibraryViewProps> = ({ 
   tracks, 
   setTracks, 
-  searchQuery,
-  onSearchChange,
   onPlayTrack, 
-  currentlyPlayingPath,
   likedTracks,
   onToggleLike,
   onEditTrack,
   onAddToQueue,
-  onTrackContextMenu
+  onTrackContextMenu,
+  hasScannedInSession,
+  setHasScannedInSession,
+  onNavigateToArtist
 }) => {
+  const [searchQuery, setSearchQuery] = useState('');
   const [settings, setSettings] = useState<AppSettings>({
     sourceFolderPath: '',
     destinationFolderPath: '',
@@ -98,6 +103,17 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   });
 
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+
+  // Manage collapse state of the source setup card
+  const [isCardCollapsed, setIsCardCollapsed] = useState(true);
+
+  useEffect(() => {
+    if (settings.sourceFolderPath && tracks.length > 0) {
+      setIsCardCollapsed(true);
+    } else {
+      setIsCardCollapsed(false);
+    }
+  }, [settings.sourceFolderPath, tracks.length === 0]);
 
   useEffect(() => {
     const closeAll = () => setActiveDropdown(null);
@@ -115,6 +131,17 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   // Inline Editing State
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingGenre, setEditingGenre] = useState('');
+
+  // Inline metadata editing form state
+  const [expandedTrackPath, setExpandedTrackPath] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editArtist, setEditArtist] = useState('');
+  const [editAlbum, setEditAlbum] = useState('');
+  const [editGenreState, setEditGenreState] = useState('');
+  const [editImage, setEditImage] = useState<string | null>(null);
+  const [isSavingMetadata, setIsSavingMetadata] = useState(false);
+  const [saveSuccessPath, setSaveSuccessPath] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Notification Banner
   const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'info', message: string } | null>(null);
@@ -315,7 +342,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     // Listen to progress updates from organizer main process
     let unsubscribeProgress: (() => void) | undefined;
     if (window.electronAPI?.onOrganizeProgress) {
-      unsubscribeProgress = window.electronAPI.onOrganizeProgress((progress) => {
+      unsubscribeProgress = window.electronAPI.onOrganizeProgress((progress: { current: number; total: number }) => {
         setCopyProgress(progress);
       });
     }
@@ -348,9 +375,10 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   };
 
   // 1. Scan Library Source
-  const handleScan = async () => {
-    if (!settings.sourceFolderPath) {
-      showNotification('error', 'Please configure your source folder in Settings first.');
+  const handleScan = async (pathToScan?: string) => {
+    const targetPath = (typeof pathToScan === 'string' ? pathToScan : null) || settings.sourceFolderPath;
+    if (!targetPath) {
+      showNotification('error', 'Please select or configure a source folder first.');
       return;
     }
 
@@ -360,15 +388,23 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
     try {
       if (window.electronAPI) {
-        const rawTracks = await window.electronAPI.scanLibrary(settings.sourceFolderPath);
+        let currentSettings = settings;
+        if (targetPath !== settings.sourceFolderPath) {
+          currentSettings = await window.electronAPI.saveSettings({ 
+            sourceFolderPath: targetPath 
+          });
+          setSettings(currentSettings);
+        }
+
+        const rawTracks = await window.electronAPI.scanLibrary(targetPath);
         
         // Apply overrides mapping (filename -> genre)
-        const mappedTracks = rawTracks.map((track) => {
+        const mappedTracks = rawTracks.map((track: Track) => {
           const filename = track.filePath.split(/[\\/]/).pop() || '';
-          if (settings.genreOverrides[filename] !== undefined) {
+          if (currentSettings.genreOverrides[filename] !== undefined) {
             return {
               ...track,
-              genre: [settings.genreOverrides[filename]]
+              genre: [currentSettings.genreOverrides[filename]]
             };
           }
           return track;
@@ -383,6 +419,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         });
         setSettings(updatedSettings);
         setTracks(mappedTracks);
+        setIsCardCollapsed(true);
+        setHasScannedInSession(true);
         showNotification('success', `Scan complete. Found ${mappedTracks.length} tracks.`);
       }
     } catch (err: any) {
@@ -440,6 +478,97 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       saveInlineGenre(index);
     } else if (e.key === 'Escape') {
       setEditingIndex(null);
+    }
+  };
+
+  const startInlineEditing = (track: Track) => {
+    if (expandedTrackPath === track.filePath) {
+      setExpandedTrackPath(null);
+      return;
+    }
+    setExpandedTrackPath(track.filePath);
+    setEditTitle(track.title || '');
+    setEditArtist(track.artist || '');
+    setEditAlbum(track.album || '');
+    setEditGenreState(track.genre?.[0] || '');
+    setEditImage(track.coverArt || null);
+    setSaveSuccessPath(null);
+  };
+
+  const cancelInlineEditing = () => {
+    setExpandedTrackPath(null);
+  };
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>, track: Track) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setEditImage(reader.result);
+          setFailedImages(prev => ({ ...prev, [track.filePath + '_edit']: false }));
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const saveInlineMetadata = async (track: Track) => {
+    if (isSavingMetadata) return;
+    setIsSavingMetadata(true);
+
+    try {
+      if (window.electronAPI?.writeTrackMetadata) {
+        const result = await window.electronAPI.writeTrackMetadata(track.filePath, {
+          title: editTitle,
+          artist: editArtist,
+          album: editAlbum,
+          genre: editGenreState,
+          image: editImage
+        });
+
+        if (result && result.success) {
+          const updatedTracks = tracks.map(t => {
+            if (t.filePath === track.filePath) {
+              return {
+                ...t,
+                title: editTitle,
+                artist: editArtist,
+                album: editAlbum,
+                genre: editGenreState ? [editGenreState] : [],
+                coverArt: editImage || t.coverArt
+              };
+            }
+            return t;
+          });
+          setTracks(updatedTracks);
+
+          try {
+            await window.electronAPI.saveLibrary(updatedTracks);
+            const updatedSettings = await window.electronAPI.saveSettings({
+              cachedLibrary: updatedTracks
+            });
+            setSettings(updatedSettings);
+          } catch (persistErr) {
+            console.error('Failed to sync library cache files:', persistErr);
+          }
+
+          setSaveSuccessPath(track.filePath);
+
+          setTimeout(() => {
+            setExpandedTrackPath(null);
+            setSaveSuccessPath(null);
+          }, 1000);
+        } else {
+          showNotification('error', result?.error || 'Failed to update track metadata');
+        }
+      } else {
+        showNotification('error', 'Metadata writing API is not available.');
+      }
+    } catch (err: any) {
+      showNotification('error', `Error writing metadata: ${err.message || err}`);
+    } finally {
+      setIsSavingMetadata(false);
     }
   };
 
@@ -554,12 +683,25 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     <div className="library-view">
       {/* Top Toolbar */}
       <div className="library-toolbar">
-        <div className="toolbar-left">
+        <div className="toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Music size={18} className="library-brand-icon" />
           <h2>Media Catalog</h2>
+          {hasScannedInSession && (
+            <span style={{
+              fontSize: '12px',
+              color: 'var(--text-secondary)',
+              background: 'var(--bg-main)',
+              padding: '2px 8px',
+              borderRadius: '12px',
+              border: '1px solid var(--border)',
+              marginLeft: '8px'
+            }}>
+              {tracks.length} tracks found
+            </span>
+          )}
         </div>
         <div className="toolbar-right">
-          <button className="toolbar-btn" onClick={handleScan} disabled={loading}>
+          <button className="toolbar-btn" onClick={() => handleScan()} disabled={loading}>
             <RefreshCw size={14} className={loading ? 'logo-icon' : ''} />
             <span>Scan Source</span>
           </button>
@@ -596,46 +738,179 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         </div>
       )}
 
-      {/* Search and Stats Section */}
-      <div className="library-actions">
-        <div className="search-container">
-          <Search size={16} className="search-icon" />
-          <input 
-            type="text" 
-            placeholder="Search songs, artists, genres..." 
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-          />
-          {searchQuery && (
-            <button className="search-clear-btn" onClick={() => onSearchChange('')}>
-              <X size={14} />
-            </button>
-          )}
+      {/* Source Folder Setup Card */}
+      {isCardCollapsed && settings.sourceFolderPath && tracks.length > 0 ? (
+        <div style={{
+          background: 'var(--bg-surface)',
+          borderRadius: '8px',
+          border: '1px solid var(--border)',
+          padding: '8px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          marginBottom: '20px'
+        }}>
+          <FolderOpen size={16} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+          <span style={{ fontSize: '13px', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            Source Folder: <strong>{settings.sourceFolderPath}</strong>
+          </span>
+          <button 
+            type="button" 
+            onClick={() => {
+              setIsCardCollapsed(false);
+              setTracks([]);
+              setHasScannedInSession(false);
+            }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--primary)',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 600,
+              padding: '4px 8px',
+              borderRadius: '4px',
+              marginLeft: 'auto',
+              transition: 'opacity 0.2s'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.opacity = '0.8'}
+            onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
+          >
+            Change
+          </button>
         </div>
-      </div>
-
-      {/* Tracks Grid table */}
-      <div className="table-container">
-        {tracks.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon" style={{ opacity: 0.5, marginBottom: '16px', display: 'flex', justifyContent: 'center' }}>
-              <AppIcon size={48} />
-            </div>
-            <h3>No Audio Tracks Found</h3>
-            <p>Click "Scan Now" to search files inside your configured media source directory.</p>
-            <button className="button-primary" style={{ marginTop: '12px' }} onClick={handleScan} disabled={loading}>
-              <RefreshCw size={14} className={loading ? 'logo-icon' : ''} />
-              <span>Scan Now</span>
+      ) : (
+        <div style={{
+          background: 'var(--bg-surface)',
+          borderRadius: '12px',
+          border: '1px solid var(--border)',
+          padding: '16px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '16px',
+          marginBottom: '20px'
+        }}>
+          <FolderOpen size={24} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+          <div style={{ flex: 1, display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <input 
+              type="text" 
+              value={srcPathInput}
+              onChange={(e) => {
+                setSrcPathInput(e.target.value);
+                setTracks([]);
+                setHasScannedInSession(false);
+              }}
+              placeholder="Select source folder..."
+              style={{
+                flex: 1,
+                background: 'var(--bg-main)',
+                border: '1px solid var(--border-medium)',
+                borderRadius: '6px',
+                padding: '8px 12px',
+                color: 'var(--text-primary)',
+                outline: 'none',
+                fontSize: '13px'
+              }}
+            />
+            <button 
+              type="button" 
+              className="btn-browse" 
+              onClick={async () => {
+                if (window.electronAPI?.selectFolder) {
+                  const selected = await window.electronAPI.selectFolder();
+                  if (selected) {
+                    setSrcPathInput(selected);
+                    setTracks([]);
+                    setHasScannedInSession(false);
+                  }
+                }
+              }}
+              style={{
+                backgroundColor: 'var(--bg-card)',
+                border: '1px solid var(--border-medium)',
+                color: 'var(--text-primary)',
+                padding: '8px 14px',
+                borderRadius: '6px',
+                fontSize: '13px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                flexShrink: 0
+              }}
+            >
+              <span>Browse</span>
             </button>
           </div>
-        ) : filteredTracks.length === 0 ? (
-          <div className="empty-state">
-            <Search size={48} className="empty-icon" />
-            <h3>No Matches Found</h3>
-            <p>No tracks matching "{searchQuery}" were found in your library.</p>
+          <button 
+            type="button" 
+            className="button-primary"
+            onClick={() => handleScan(srcPathInput)}
+            disabled={loading}
+            style={{
+              padding: '8px 16px',
+              fontSize: '13px',
+              fontWeight: 500,
+              flexShrink: 0
+            }}
+          >
+            {loading ? <span>Scanning...</span> : <span>Scan Now</span>}
+          </button>
+        </div>
+      )}
+
+      {!hasScannedInSession ? (
+        <div className="empty-state" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '300px' }}>
+          <FolderSearch size={48} style={{ color: 'var(--accent)', marginBottom: '16px' }} />
+          <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 8px 0' }}>
+            No tracks scanned yet
+          </h3>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '360px', margin: 0, textAlign: 'center' }}>
+            Set your source folder above and click Scan Source to load your music files
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Search and Stats Section */}
+          <div className="library-actions">
+            <div className="search-container">
+              <Search size={16} className="search-icon" />
+              <input 
+                type="text" 
+                placeholder="Search songs, artists, genres..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {searchQuery && (
+                <button className="search-clear-btn" onClick={() => setSearchQuery('')}>
+                  <X size={14} />
+                </button>
+              )}
+            </div>
           </div>
-        ) : (
-          <table className="tracks-table">
+
+          {/* Tracks Grid table */}
+          <div className="table-container">
+            {tracks.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-icon" style={{ opacity: 0.5, marginBottom: '16px', display: 'flex', justifyContent: 'center' }}>
+                  <AppIcon size={48} />
+                </div>
+                <h3>No Audio Tracks Found</h3>
+                <p>Click "Scan Now" to search files inside your configured media source directory.</p>
+                <button className="button-primary" style={{ marginTop: '12px' }} onClick={() => handleScan()} disabled={loading}>
+                  <RefreshCw size={14} className={loading ? 'logo-icon' : ''} />
+                  <span>Scan Now</span>
+                </button>
+              </div>
+            ) : filteredTracks.length === 0 ? (
+              <div className="empty-state">
+                <Search size={48} className="empty-icon" />
+                <h3>No Matches Found</h3>
+                <p>No tracks matching "{searchQuery}" were found in your library.</p>
+              </div>
+            ) : (
+              <table className="tracks-table">
             <thead>
               <tr>
                 <th style={{ width: '60px', textAlign: 'center' }}></th>
@@ -649,9 +924,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             </thead>
             <tbody>
               {filteredTracks.map((track, idx) => {
-                const isPlaying = track.filePath === currentlyPlayingPath;
                 const classes = [];
-                if (isPlaying) classes.push('playing-row');
                 if (track.isDuplicate) classes.push('duplicate-row');
 
                 const currentBasename = track.filePath.split(/[\\/]/).pop()?.toLowerCase();
@@ -659,126 +932,102 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                   (!!currentBasename && likedTracks.some(p => p.split(/[\\/]/).pop()?.toLowerCase() === currentBasename));
 
                 return (
-                  <tr 
-                    key={idx} 
-                    className={classes.join(' ')}
-                    onContextMenu={(e) => onTrackContextMenu?.(e, track, () => startEditing(idx, track))}
-                  >
-                    <td style={{ textAlign: 'center', width: '60px', padding: '6px' }}>
-                      {track.coverArt && !failedImages[track.filePath] ? (
-                        <img 
-                          src={track.coverArt} 
-                          alt="Cover" 
-                          onError={() => {
-                            setFailedImages(prev => ({ ...prev, [track.filePath]: true }));
-                          }}
-                          style={{ 
+                  <React.Fragment key={track.filePath || idx}>
+                    <tr 
+                      className={classes.join(' ')}
+                      onContextMenu={(e) => onTrackContextMenu?.(e, track, () => startEditing(idx, track))}
+                    >
+                      <td style={{ textAlign: 'center', width: '60px', padding: '6px' }}>
+                        {track.coverArt && !failedImages[track.filePath] ? (
+                          <img 
+                            src={track.coverArt} 
+                            alt="Cover" 
+                            onError={() => {
+                              setFailedImages(prev => ({ ...prev, [track.filePath]: true }));
+                            }}
+                            style={{ 
+                              width: '40px', 
+                              height: '40px', 
+                              borderRadius: '6px', 
+                              objectFit: 'cover',
+                              display: 'block',
+                              margin: '0 auto',
+                              border: '1px solid var(--border-light)'
+                            }} 
+                          />
+                        ) : (
+                          <div style={{ 
                             width: '40px', 
                             height: '40px', 
                             borderRadius: '6px', 
-                            objectFit: 'cover',
-                            display: 'block',
-                            margin: '0 auto',
-                            border: '1px solid var(--border-light)'
-                          }} 
-                        />
-                      ) : (
-                        <div style={{ 
-                          width: '40px', 
-                          height: '40px', 
-                          borderRadius: '6px', 
-                          backgroundColor: 'var(--bg-main)', 
-                          border: '1px solid var(--border-light)',
-                          display: 'flex', 
-                          alignItems: 'center', 
-                          justifyContent: 'center',
-                          color: 'var(--text-muted)',
-                          margin: '0 auto'
-                        }}>
-                          <Music size={16} />
-                        </div>
-                      )}
-                    </td>
-                    <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{idx + 1}</td>
-                    <td 
-                      className="track-title-cell" 
-                      title={track.filePath}
-                      onClick={() => onPlayTrack?.(track, filteredTracks)}
-                    >
-                      <div className="track-title-text">
-                        {track.title.replace(/\s*[\(\[](feat|ft)\.?\s+[^\]\)]+[\)\]]/i, '').trim()}
-                      </div>
-                      <div className="track-artist-text" style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '3px', fontWeight: 400 }}>
-                        {track.artist}
-                      </div>
-                    </td>
-                    
-                    {/* Inline editable Genre Cell */}
-                    <td 
-                      className="genre-cell-editable"
-                      onClick={() => startEditing(idx, track)}
-                    >
-                      {editingIndex === idx ? (
-                        <input
-                          className="inline-genre-input"
-                          type="text"
-                          value={editingGenre}
-                          onChange={(e) => setEditingGenre(e.target.value)}
-                          onBlur={() => saveInlineGenre(idx)}
-                          onKeyDown={(e) => handleKeyDown(e, idx)}
-                          autoFocus
-                        />
-                      ) : (
-                        <div className="genre-text-wrap">
-                          <span>{track.genre[0] || 'Unsorted'}</span>
-                          <span className="genre-edit-tip">Click to Edit</span>
-                        </div>
-                      )}
-                    </td>
-
-                    <td style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
-                      {formatDuration(track.duration)}
-                    </td>
-                    
-                    <td style={{ textAlign: 'center' }}>
-                      {track.isDuplicate ? (
-                        <span className="badge-duplicate">
-                          <AlertTriangle size={10} />
-                          <span>Duplicate</span>
-                        </span>
-                      ) : (
-                        <span className="badge-unique">Unique</span>
-                      )}
-                    </td>
-
-                    <td style={{ textAlign: 'center' }}>
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onToggleLike(track.filePath); }}
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            cursor: 'pointer',
-                            padding: '4px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
+                            backgroundColor: 'var(--bg-main)', 
+                            border: '1px solid var(--border-light)',
+                            display: 'flex', 
+                            alignItems: 'center', 
                             justifyContent: 'center',
-                          }}
-                          title={isLiked ? "Unlike Track" : "Like Track"}
-                        >
-                          <Heart 
-                            size={16} 
-                            fill={isLiked ? "#a78bfa" : "none"} 
-                            color={isLiked ? "#a78bfa" : "#6b7280"} 
+                            color: 'var(--text-muted)',
+                            margin: '0 auto'
+                          }}>
+                            <Music size={16} />
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                      <td 
+                        className="track-title-cell" 
+                        title={track.filePath}
+                        onClick={() => onPlayTrack?.(track, filteredTracks)}
+                      >
+                        <div className="track-title-text">
+                          {track.title.replace(/\s*[\(\[](feat|ft)\.?\s+[^\]\)]+[\)\]]/i, '').trim()}
+                        </div>
+                        <div className="track-artist-text" style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '3px', fontWeight: 400 }}>
+                          <ArtistLinks artist={track.artist} onNavigate={onNavigateToArtist} />
+                        </div>
+                      </td>
+                      
+                      {/* Inline editable Genre Cell */}
+                      <td 
+                        className="genre-cell-editable"
+                        onClick={() => startEditing(idx, track)}
+                      >
+                        {editingIndex === idx ? (
+                          <input
+                            className="inline-genre-input"
+                            type="text"
+                            value={editingGenre}
+                            onChange={(e) => setEditingGenre(e.target.value)}
+                            onBlur={() => saveInlineGenre(idx)}
+                            onKeyDown={(e) => handleKeyDown(e, idx)}
+                            autoFocus
                           />
-                        </button>
-                        
-                        <div style={{ position: 'relative' }}>
+                        ) : (
+                          <div className="genre-text-wrap">
+                            <span>{track.genre[0] || 'Unsorted'}</span>
+                            <span className="genre-edit-tip">Click to Edit</span>
+                          </div>
+                        )}
+                      </td>
+
+                      <td style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
+                        {formatDuration(track.duration)}
+                      </td>
+                      
+                      <td style={{ textAlign: 'center' }}>
+                        {track.isDuplicate ? (
+                          <span className="badge-duplicate">
+                            <AlertTriangle size={10} />
+                            <span>Duplicate</span>
+                          </span>
+                        ) : (
+                          <span className="badge-unique">Unique</span>
+                        )}
+                      </td>
+
+                      <td style={{ textAlign: 'center' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveDropdown(activeDropdown === track.filePath ? null : track.filePath);
-                            }}
+                            onClick={(e) => { e.stopPropagation(); onToggleLike(track.filePath); }}
                             style={{
                               background: 'transparent',
                               border: 'none',
@@ -787,37 +1036,281 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                               display: 'inline-flex',
                               alignItems: 'center',
                               justifyContent: 'center',
-                              color: 'var(--text-secondary)'
                             }}
-                            title="More Actions"
+                            title={isLiked ? "Unlike Track" : "Like Track"}
                           >
-                            <MoreVertical size={16} />
+                            <Heart 
+                              size={16} 
+                              fill={isLiked ? "#a78bfa" : "none"} 
+                              color={isLiked ? "#a78bfa" : "#6b7280"} 
+                            />
                           </button>
+                          
+                          <button
+                            onClick={(e) => { e.stopPropagation(); startInlineEditing(track); }}
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              cursor: 'pointer',
+                              padding: '4px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: expandedTrackPath === track.filePath ? 'var(--accent, #7c5cbf)' : 'var(--text-secondary)'
+                            }}
+                            title="Edit Metadata"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          
+                          <div style={{ position: 'relative' }}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveDropdown(activeDropdown === track.filePath ? null : track.filePath);
+                              }}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                cursor: 'pointer',
+                                padding: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: 'var(--text-secondary)'
+                              }}
+                              title="More Actions"
+                            >
+                              <MoreVertical size={16} />
+                            </button>
 
-                          {activeDropdown === track.filePath && (
-                            <div className="track-action-dropdown">
-                              <button onClick={() => onPlayTrack?.(track, tracks)}>Play</button>
-                              <button onClick={() => { onAddToQueue?.(track); setActiveDropdown(null); }}>Add to Queue</button>
-                              <button onClick={() => { setSelectedTrackForPlaylist(track); setActiveDropdown(null); }}>Add to Playlist</button>
-                              <button onClick={() => { alert(`Album: ${track.album}`); setActiveDropdown(null); }}>Go to Album</button>
-                              <button onClick={() => { 
-                                navigator.clipboard.writeText(track.filePath);
-                                alert(`File path copied to clipboard: ${track.filePath}`);
-                                setActiveDropdown(null);
-                              }}>Share File Path</button>
-                              <button onClick={() => { onEditTrack?.(track); setActiveDropdown(null); }}>Properties</button>
-                            </div>
-                          )}
+                            {activeDropdown === track.filePath && (
+                              <div className="track-action-dropdown">
+                                <button onClick={() => onPlayTrack?.(track, tracks)}>Play</button>
+                                <button onClick={() => { onAddToQueue?.(track); setActiveDropdown(null); }}>Add to Queue</button>
+                                <button onClick={() => { setSelectedTrackForPlaylist(track); setActiveDropdown(null); }}>Add to Playlist</button>
+                                <button onClick={() => { alert(`Album: ${track.album}`); setActiveDropdown(null); }}>Go to Album</button>
+                                <button onClick={() => { 
+                                  navigator.clipboard.writeText(track.filePath);
+                                  alert(`File path copied to clipboard: ${track.filePath}`);
+                                  setActiveDropdown(null);
+                                }}>Share File Path</button>
+                                <button onClick={() => { onEditTrack?.(track); setActiveDropdown(null); }}>Properties</button>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                  </tr>
+                      </td>
+                    </tr>
+
+                    {expandedTrackPath === track.filePath && (
+                      <tr style={{ backgroundColor: 'var(--bg-surface)' }}>
+                        <td colSpan={7} style={{ padding: '16px 24px', borderTop: 'none' }}>
+                          <div style={{
+                            display: 'flex',
+                            gap: '24px',
+                            alignItems: 'flex-start',
+                            background: 'var(--bg-surface)',
+                            border: '1px solid var(--border)',
+                            borderRadius: '8px',
+                            padding: '16px'
+                          }}>
+                            <input
+                              type="file"
+                              ref={fileInputRef}
+                              accept="image/*"
+                              onChange={(e) => handleImageChange(e, track)}
+                              style={{ display: 'none' }}
+                            />
+
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                              {editImage && !failedImages[track.filePath + '_edit'] ? (
+                                <img 
+                                  src={editImage} 
+                                  alt="Cover Art Preview" 
+                                  onError={() => {
+                                    setFailedImages(prev => ({ ...prev, [track.filePath + '_edit']: true }));
+                                  }}
+                                  style={{ 
+                                    width: '90px', 
+                                    height: '90px', 
+                                    borderRadius: '8px', 
+                                    objectFit: 'cover',
+                                    border: '1px solid var(--border-light)'
+                                  }} 
+                                />
+                              ) : (
+                                <div style={{ 
+                                  width: '90px', 
+                                  height: '90px', 
+                                  borderRadius: '8px', 
+                                  backgroundColor: 'var(--bg-main)', 
+                                  border: '1px solid var(--border)',
+                                  display: 'flex', 
+                                  alignItems: 'center', 
+                                  justifyContent: 'center',
+                                  color: 'var(--text-muted)'
+                                }}>
+                                  <Music size={32} />
+                                </div>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => fileInputRef.current?.click()}
+                                style={{
+                                  backgroundColor: 'var(--bg-main)',
+                                  color: 'var(--text-primary)',
+                                  border: '1px solid var(--border)',
+                                  borderRadius: '6px',
+                                  padding: '6px 12px',
+                                  fontSize: '11px',
+                                  cursor: 'pointer',
+                                  outline: 'none'
+                                }}
+                              >
+                                Change
+                              </button>
+                            </div>
+
+                            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Title</label>
+                                <input
+                                  type="text"
+                                  value={editTitle}
+                                  onChange={(e) => setEditTitle(e.target.value)}
+                                  style={{
+                                    background: 'var(--bg-main)',
+                                    border: '1px solid var(--border)',
+                                    borderRadius: '6px',
+                                    padding: '8px 12px',
+                                    color: 'var(--text-primary)',
+                                    fontSize: '13px',
+                                    outline: 'none'
+                                  }}
+                                />
+                              </div>
+
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Artist</label>
+                                <input
+                                  type="text"
+                                  value={editArtist}
+                                  onChange={(e) => setEditArtist(e.target.value)}
+                                  style={{
+                                    background: 'var(--bg-main)',
+                                    border: '1px solid var(--border)',
+                                    borderRadius: '6px',
+                                    padding: '8px 12px',
+                                    color: 'var(--text-primary)',
+                                    fontSize: '13px',
+                                    outline: 'none'
+                                  }}
+                                />
+                              </div>
+
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Album</label>
+                                <input
+                                  type="text"
+                                  value={editAlbum}
+                                  onChange={(e) => setEditAlbum(e.target.value)}
+                                  style={{
+                                    background: 'var(--bg-main)',
+                                    border: '1px solid var(--border)',
+                                    borderRadius: '6px',
+                                    padding: '8px 12px',
+                                    color: 'var(--text-primary)',
+                                    fontSize: '13px',
+                                    outline: 'none'
+                                  }}
+                                />
+                              </div>
+
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Genre</label>
+                                <input
+                                  type="text"
+                                  value={editGenreState}
+                                  onChange={(e) => setEditGenreState(e.target.value)}
+                                  style={{
+                                    background: 'var(--bg-main)',
+                                    border: '1px solid var(--border)',
+                                    borderRadius: '6px',
+                                    padding: '8px 12px',
+                                    color: 'var(--text-primary)',
+                                    fontSize: '13px',
+                                    outline: 'none'
+                                  }}
+                                />
+                              </div>
+
+                              <div style={{ gridColumn: 'span 2', display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
+                                <button
+                                  type="button"
+                                  onClick={cancelInlineEditing}
+                                  disabled={isSavingMetadata || saveSuccessPath === track.filePath}
+                                  style={{
+                                    backgroundColor: 'transparent',
+                                    color: 'var(--text-secondary)',
+                                    border: '1px solid var(--border)',
+                                    borderRadius: '6px',
+                                    padding: '8px 16px',
+                                    fontSize: '13px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    outline: 'none'
+                                  }}
+                                >
+                                  Cancel
+                                </button>
+                                
+                                <button
+                                  type="button"
+                                  onClick={() => saveInlineMetadata(track)}
+                                  disabled={isSavingMetadata || saveSuccessPath === track.filePath}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    backgroundColor: saveSuccessPath === track.filePath ? '#22c55e' : 'var(--accent, #7c5cbf)',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    padding: '8px 16px',
+                                    fontSize: '13px',
+                                    fontWeight: 600,
+                                    cursor: (isSavingMetadata || saveSuccessPath === track.filePath) ? 'default' : 'pointer',
+                                    outline: 'none',
+                                    transition: 'background-color 0.2s ease'
+                                  }}
+                                >
+                                  {saveSuccessPath === track.filePath ? (
+                                    <>
+                                      <Check size={16} />
+                                      <span>Saved</span>
+                                    </>
+                                  ) : isSavingMetadata ? (
+                                    <span>Saving...</span>
+                                  ) : (
+                                    <span>Save Changes</span>
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 );
               })}
             </tbody>
           </table>
         )}
       </div>
+    </>
+  )}
 
       {/* Copy Progress Overlay */}
       {isCopying && copyProgress && (
@@ -924,7 +1417,11 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                   <input 
                     type="text" 
                     value={srcPathInput}
-                    onChange={(e) => setSrcPathInput(e.target.value)}
+                    onChange={(e) => {
+                      setSrcPathInput(e.target.value);
+                      setTracks([]);
+                      setHasScannedInSession(false);
+                    }}
                     placeholder="D:\Media\Audio\Music"
                     required
                   />

@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { Minus, Square, X } from 'lucide-react';
 
 interface ElectronAPI {
   minimize: () => void;
   maximize: () => void;
   close: () => void;
+  minimizeWindow: () => void;
+  maximizeWindow: () => void;
+  closeWindow: () => void;
   getWindowState: () => Promise<{ isMaximized: boolean }>;
   onWindowStateChanged: (callback: (state: { isMaximized: boolean }) => void) => () => void;
+  [key: string]: any;
 }
 
 declare global {
@@ -36,33 +39,33 @@ export const WindowControls: React.FC = () => {
   }, [hasAPI]);
 
   const handleMinimize = () => {
-    if (hasAPI && window.electronAPI) {
-      window.electronAPI.minimize();
+    if (hasAPI && window.electronAPI?.minimizeWindow) {
+      window.electronAPI.minimizeWindow();
     }
   };
 
   const handleMaximize = () => {
-    if (hasAPI && window.electronAPI) {
-      window.electronAPI.maximize();
+    if (hasAPI && window.electronAPI?.maximizeWindow) {
+      window.electronAPI.maximizeWindow();
     }
   };
 
   const handleClose = () => {
-    if (hasAPI && window.electronAPI) {
-      window.electronAPI.close();
+    if (hasAPI && window.electronAPI?.closeWindow) {
+      window.electronAPI.closeWindow();
     }
   };
 
   return (
     <div className="window-controls-container">
-      <button className="window-control-btn minimize" onClick={handleMinimize} title="Minimize">
-        <Minus size={14} />
+      <button className="window-control-btn minimize" onClick={handleMinimize}>
+        {"\uE921"}
       </button>
-      <button className="window-control-btn maximize" onClick={handleMaximize} title={isMaximized ? 'Restore' : 'Maximize'}>
-        <Square size={14} />
+      <button className="window-control-btn maximize" onClick={handleMaximize}>
+        {isMaximized ? "\uE923" : "\uE922"}
       </button>
-      <button className="window-control-btn close" onClick={handleClose} title="Close">
-        <X size={14} />
+      <button className="window-control-btn close" onClick={handleClose}>
+        {"\uE8BB"}
       </button>
     </div>
   );

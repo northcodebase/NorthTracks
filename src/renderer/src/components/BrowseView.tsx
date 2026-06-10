@@ -13,6 +13,7 @@ import {
   Heart
 } from 'lucide-react';
 import { Track } from './LibraryView';
+import { ArtistLinks } from './ArtistLinks';
 
 interface BrowseViewProps {
   tracks: Track[];
@@ -28,6 +29,7 @@ interface BrowseViewProps {
   selectedGenre: string;
   setSelectedGenre: (genre: string) => void;
   onTrackContextMenu?: (e: React.MouseEvent, track: Track) => void;
+  onNavigateToArtist: (artistName: string) => void;
 }
 
 export const BrowseView: React.FC<BrowseViewProps> = ({
@@ -43,7 +45,8 @@ export const BrowseView: React.FC<BrowseViewProps> = ({
   onToggleLike,
   selectedGenre,
   setSelectedGenre,
-  onTrackContextMenu
+  onTrackContextMenu,
+  onNavigateToArtist,
 }) => {
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -269,7 +272,7 @@ export const BrowseView: React.FC<BrowseViewProps> = ({
                         {track.title.replace(/\s*[\(\[](feat|ft|featuring|with)\.?[^\)\]]*[\)\]]/gi, '').trim()}
                       </div>
                       <div className="track-artist-text" style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '3px', fontWeight: 400 }}>
-                        {track.artist}
+                        <ArtistLinks artist={track.artist} onNavigate={onNavigateToArtist} />
                       </div>
                     </td>
                     <td style={{ color: 'var(--text-secondary)' }}>

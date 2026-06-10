@@ -1,31 +1,29 @@
 import React from 'react';
-import { Compass, Construction } from 'lucide-react';
+import { Construction } from 'lucide-react';
 
-export interface Track {
-  filePath: string;
-  title: string;
-  artist: string;
-  album: string;
-  genre: string[];
-  duration: number;
-  bitrate: number;
-  isDuplicate?: boolean;
+interface Playlist {
+  id: string;
+  name: string;
+  tracks: string[];
   coverArt?: string;
 }
 
-interface ExploreViewProps {
-  onNavigateToGenre: (genre: string) => void;
-  tracks: Track[];
-  playCounts: Record<string, number>;
-  onPlayTrack: (track: Track, queue?: Track[]) => void;
-  onEditTrack: (track: Track) => void;
-  onNavigateToArtist?: (artistName: string) => void;
+interface PlaylistsViewProps {
+  playlists: Playlist[];
+  selectedPlaylistId: string | null;
+  libraryTracks: any[];
+  onPlayTrack: (track: any, queue?: any[]) => void;
+  onNewPlaylist: () => void;
+  onDeletePlaylist: (id: string) => void;
+  onRemoveTrackFromPlaylist: (playlistId: string, filePath: string) => void;
+  onSavePlaylists: (playlists: Playlist[]) => void;
+  setCurrentView: (view: string) => void;
 }
 
-export const ExploreView: React.FC<ExploreViewProps> = () => {
+export const PlaylistsView: React.FC<PlaylistsViewProps> = () => {
   return (
     <div className="content-area fade-in" style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: '16px 24px 24px 24px', gap: '16px' }}>
-      {/* Top Header & Search Bar Toolbar */}
+      {/* Page header */}
       <div 
         className="library-toolbar" 
         style={{ 
@@ -38,8 +36,7 @@ export const ExploreView: React.FC<ExploreViewProps> = () => {
         }}
       >
         <div className="toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Compass size={18} style={{ color: 'var(--primary)' }} />
-          <h2 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>Explore Catalog</h2>
+          <h2 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>Playlists</h2>
         </div>
       </div>
 

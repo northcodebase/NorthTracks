@@ -21,7 +21,6 @@ interface SettingsViewProps {
 export const SettingsView: React.FC<SettingsViewProps> = ({ settingsCategory }) => {
   const { theme, setTheme } = useTheme();
 
-  const [sourceFolderPath, setSourceFolderPath] = useState('');
   const [destinationFolderPath, setDestinationFolderPath] = useState('');
   const [autoDetectDuplicates, setAutoDetectDuplicates] = useState(true);
   const [watchSourceFolder, setWatchSourceFolder] = useState(false);
@@ -56,7 +55,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settingsCategory }) 
     loadSettings();
     loadStats();
     if (window.electronAPI?.getSystemInfo) {
-      window.electronAPI.getSystemInfo().then((info) => {
+      window.electronAPI.getSystemInfo().then((info: { isWin11: boolean }) => {
         setIsWin11(info.isWin11);
       });
     }
@@ -108,7 +107,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settingsCategory }) 
     if (window.electronAPI) {
       try {
         const s = await window.electronAPI.getSettings();
-        setSourceFolderPath(s.sourceFolderPath || '');
         setDestinationFolderPath(s.destinationFolderPath || '');
         setAutoDetectDuplicates(s.autoDetectDuplicates !== undefined ? s.autoDetectDuplicates : true);
         setWatchSourceFolder(s.watchSourceFolder !== undefined ? s.watchSourceFolder : false);
@@ -132,15 +130,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settingsCategory }) 
     }
   };
 
-  const handleBrowseSource = async () => {
-    if (window.electronAPI?.selectFolder) {
-      const selected = await window.electronAPI.selectFolder();
-      if (selected) {
-        setSourceFolderPath(selected);
-      }
-    }
-  };
-
   const handleBrowseDest = async () => {
     if (window.electronAPI?.selectFolder) {
       const selected = await window.electronAPI.selectFolder();
@@ -157,7 +146,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settingsCategory }) 
         const isStyleChanged = visualStyle !== initialVisualStyle;
         
         await window.electronAPI.saveSettings({
-          sourceFolderPath,
           destinationFolderPath,
           autoDetectDuplicates,
           watchSourceFolder,
@@ -234,24 +222,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settingsCategory }) 
               <h3 className="settings-section-title">Directory Folders</h3>
               <p className="settings-section-desc">Configure target directories where NorthTracks scans and organizes local audio libraries.</p>
               
-              <div className="form-group" style={{ marginBottom: '20px' }}>
-                <label>Source Music Folder</label>
-                <div className="path-picker-row">
-                  <input 
-                    type="text" 
-                    value={sourceFolderPath}
-                    onChange={(e) => setSourceFolderPath(e.target.value)}
-                    placeholder="D:\Media\Audio\Music"
-                    required
-                  />
-                  <button type="button" className="btn-browse" onClick={handleBrowseSource}>
-                    <FolderOpen size={14} />
-                    <span>Browse</span>
-                  </button>
-                </div>
-                <small>Specifies the path scanned recursively for .mp3, .m4a, .flac, and .wav tracks.</small>
-              </div>
-
               <div className="form-group">
                 <label>Destination Music Folder</label>
                 <div className="path-picker-row">

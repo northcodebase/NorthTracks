@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronLeft, Play, Heart, Music2, Clock, MoreVertical, Shuffle } from 'lucide-react';
-import { Track } from './ExploreView';
+import { Track } from './LibraryView';
 import { ArtistLinks } from './ArtistLinks';
 
-interface GenreViewProps {
-  genre: string;
+interface ArtistViewProps {
+  artist: string;
   tracks: Track[];
   onBack: () => void;
   onPlayTrack: (track: Track, queue: Track[]) => void;
@@ -15,13 +15,13 @@ interface GenreViewProps {
   onEditTrack: (track: Track) => void;
   onAddToQueue: (track: Track) => void;
   onTrackContextMenu?: (e: React.MouseEvent, track: Track) => void;
+  likedArtists: string[];
+  onToggleLikeArtist: (artistName: string) => void;
   onNavigateToArtist: (artistName: string) => void;
-  /** Called with the updated base64 cover whenever user changes the cover image */
-  onCoverChange?: (genre: string, base64: string) => void;
 }
 
-export const GenreView: React.FC<GenreViewProps> = ({
-  genre,
+export const ArtistView: React.FC<ArtistViewProps> = ({
+  artist,
   tracks,
   onBack,
   onPlayTrack,
@@ -31,33 +31,69 @@ export const GenreView: React.FC<GenreViewProps> = ({
   onEditTrack,
   onAddToQueue,
   onTrackContextMenu,
+  likedArtists,
+  onToggleLikeArtist,
   onNavigateToArtist,
-  onCoverChange,
 }) => {
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [customCover, setCustomCover] = useState<string | null>(null);
-  const [customBg, setCustomBg] = useState<string | null>(null);
+  const [itunesCover, setItunesCover] = useState<string | null>(null);
+  const [loadingImage, setLoadingImage] = useState(false);
 
+  // Load custom cover from electron-store and fetch iTunes image
   useEffect(() => {
-    const loadCustomCover = async () => {
+    const loadArtistCover = async () => {
+      // 1. Reset states
+      setCustomCover(null);
+      setItunesCover(null);
+      setLoadingImage(true);
+
+      // 2. Load custom cover from electron-store
       if (window.electronAPI?.getSettings) {
         try {
           const settings = await window.electronAPI.getSettings();
-          const savedCover = settings[`custom-genre-cover-${genre}`];
-          if (savedCover) setCustomCover(savedCover);
-          else setCustomCover(null);
-          const savedBg = settings[`custom-genre-bg-${genre}`];
-          if (savedBg) setCustomBg(savedBg);
-          else setCustomBg(null);
+          const savedCover = settings[`custom-artist-cover-${artist}`];
+          if (savedCover) {
+            setCustomCover(savedCover);
+            setLoadingImage(false);
+            return; // Use custom cover immediately and skip iTunes fetch
+          }
         } catch (e) {
-          console.error('Failed to load custom genre cover:', e);
+          console.error('Failed to load custom artist cover:', e);
         }
       }
-    };
-    loadCustomCover();
-  }, [genre]);
 
+      // 3. Fallback: Fetch from iTunes Search API
+      try {
+        const url = `https://itunes.apple.com/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=5`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.results && data.results.length > 0) {
+            // Find a result that matches the artist name
+            const result = data.results.find(
+              (r: any) => r.artistName?.toLowerCase().includes(artist.toLowerCase())
+            ) || data.results[0];
+
+            if (result && result.artworkUrl100) {
+              // Get high-res version of the artwork
+              const artworkUrl = result.artworkUrl100.replace('100x100bb.jpg', '600x600bb.jpg');
+              setItunesCover(artworkUrl);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch artist image from iTunes API:', err);
+      } finally {
+        setLoadingImage(false);
+      }
+    };
+
+    loadArtistCover();
+  }, [artist]);
+
+  // Handle custom image uploads
   const handleCoverImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -69,34 +105,10 @@ export const GenreView: React.FC<GenreViewProps> = ({
           if (window.electronAPI?.saveSettings) {
             try {
               await window.electronAPI.saveSettings({
-                [`custom-genre-cover-${genre}`]: base64Data
+                [`custom-artist-cover-${artist}`]: base64Data
               });
             } catch (err) {
-              console.error('Failed to save custom genre cover settings:', err);
-            }
-          }
-          onCoverChange?.(genre, base64Data);
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleBgImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        if (typeof reader.result === 'string') {
-          const base64Data = reader.result;
-          setCustomBg(base64Data);
-          if (window.electronAPI?.saveSettings) {
-            try {
-              await window.electronAPI.saveSettings({
-                [`custom-genre-bg-${genre}`]: base64Data
-              });
-            } catch (err) {
-              console.error('Failed to save custom genre bg:', err);
+              console.error('Failed to save custom artist cover settings:', err);
             }
           }
         }
@@ -105,10 +117,8 @@ export const GenreView: React.FC<GenreViewProps> = ({
     }
   };
 
-  // Background: prefer custom bg, then custom cover, then first track cover art
-  const bgImageToUse = customBg || customCover || tracks.find((t) => t.coverArt)?.coverArt;
-  // Thumbnail cover: prefer custom cover, then first track cover
-  const coverImageToUse = customCover || tracks.find((t) => t.coverArt)?.coverArt;
+  const coverImageToUse = customCover || itunesCover || tracks.find((t) => t.coverArt)?.coverArt;
+  const isArtistLiked = likedArtists.includes(artist);
 
   // Format seconds to mm:ss
   const formatTime = (secs: number) => {
@@ -129,7 +139,7 @@ export const GenreView: React.FC<GenreViewProps> = ({
 
   return (
     <div className="content-area fade-in" style={{ padding: 0, height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-      {/* Redesigned 240px tall hero header */}
+      {/* 240px tall hero header banner */}
       <div
         className="genre-header"
         style={{
@@ -142,8 +152,8 @@ export const GenreView: React.FC<GenreViewProps> = ({
           flexShrink: 0,
         }}
       >
-        {/* Crisp background cover image */}
-        {bgImageToUse ? (
+        {/* Background Cover Image */}
+        {coverImageToUse ? (
           <div
             style={{
               position: 'absolute',
@@ -151,7 +161,7 @@ export const GenreView: React.FC<GenreViewProps> = ({
               left: 0,
               width: '100%',
               height: '100%',
-              backgroundImage: `url(${bgImageToUse})`,
+              backgroundImage: `url(${coverImageToUse})`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
               zIndex: 1
@@ -171,38 +181,7 @@ export const GenreView: React.FC<GenreViewProps> = ({
           />
         )}
 
-        {/* Change Background button — top-right corner of banner */}
-        <label
-          title="Change Background Image"
-          style={{
-            position: 'absolute',
-            top: '16px',
-            right: '16px',
-            zIndex: 4,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            background: 'rgba(0,0,0,0.55)',
-            color: 'rgba(255,255,255,0.85)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            borderRadius: '20px',
-            padding: '5px 12px',
-            fontSize: '12px',
-            fontWeight: 500,
-            cursor: 'pointer',
-            backdropFilter: 'blur(4px)',
-            transition: 'background 0.2s',
-          }}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-            <circle cx="12" cy="13" r="4"/>
-          </svg>
-          Change Background
-          <input type="file" accept="image/*" onChange={handleBgImageChange} style={{ display: 'none' }} />
-        </label>
-
-        {/* Dark overlay gradient & Vignette */}
+        {/* Readability Overlay Gradient */}
         <div
           className="genre-header-vignette"
           style={{
@@ -216,7 +195,7 @@ export const GenreView: React.FC<GenreViewProps> = ({
           }}
         />
 
-        {/* Back Button */}
+        {/* Back Navigation Button */}
         <button
           onClick={onBack}
           style={{
@@ -241,14 +220,14 @@ export const GenreView: React.FC<GenreViewProps> = ({
           <ChevronLeft size={20} />
         </button>
 
-        {/* Header content */}
+        {/* Banner Details */}
         <div style={{ position: 'relative', zIndex: 3, display: 'flex', gap: '24px', alignItems: 'flex-end', width: '100%' }}>
           {/* Cover Art Thumbnail (120x120px) */}
-          <div style={{ position: 'relative', width: '120px', height: '120px', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-light)', flexShrink: 0 }}>
+          <div style={{ position: 'relative', width: '120px', height: '120px', borderRadius: '50%', overflow: 'hidden', border: '2px solid var(--border-light)', flexShrink: 0 }}>
             {coverImageToUse ? (
               <img 
                 src={coverImageToUse} 
-                alt="Cover Art" 
+                alt="Artist Photo" 
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
               />
             ) : (
@@ -257,12 +236,38 @@ export const GenreView: React.FC<GenreViewProps> = ({
               </div>
             )}
             
-            {/* Edit Cover Overlay / Button */}
+            {loadingImage && (
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                backgroundColor: 'rgba(0, 0, 0, 0.4)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 2
+              }}>
+                <div 
+                  className="animate-spin-custom"
+                  style={{
+                    width: '24px',
+                    height: '24px',
+                    border: '2px solid rgba(255, 255, 255, 0.3)',
+                    borderTop: '2px solid white',
+                    borderRadius: '50%'
+                  }}
+                />
+              </div>
+            )}
+            
+            {/* Edit Cover Overlay Button */}
             <label 
               style={{
                 position: 'absolute',
-                bottom: '8px',
-                right: '8px',
+                bottom: '4px',
+                right: '4px',
                 width: '28px',
                 height: '28px',
                 borderRadius: '50%',
@@ -276,7 +281,7 @@ export const GenreView: React.FC<GenreViewProps> = ({
                 border: 'none',
                 boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)'
               }}
-              title="Change Cover Art"
+              title="Upload Artist Image"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
@@ -291,14 +296,37 @@ export const GenreView: React.FC<GenreViewProps> = ({
             </label>
           </div>
 
-          {/* Title and Metadata */}
+          {/* Artist Metadata & General Controls */}
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-            <h1 style={{ fontSize: '48px', fontWeight: 800, color: 'white', margin: 0, lineHeight: 1.1 }}>
-              {genre}
-            </h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <h1 style={{ fontSize: '42px', fontWeight: 800, color: 'white', margin: 0, lineHeight: 1.1 }}>
+                {artist}
+              </h1>
+              {/* Like Artist Heart Button */}
+              <button
+                onClick={() => onToggleLikeArtist(artist)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                title={isArtistLiked ? "Unlike Artist" : "Like Artist"}
+              >
+                <Heart
+                  size={28}
+                  fill={isArtistLiked ? "#a78bfa" : "none"}
+                  color={isArtistLiked ? "#a78bfa" : "rgba(255,255,255,0.6)"}
+                  style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}
+                />
+              </button>
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '12px' }}>
               <span style={{ fontSize: '14px', color: 'rgba(255, 255, 255, 0.8)', fontWeight: 500 }}>
-                {tracks.length} {tracks.length === 1 ? 'song' : 'songs'}
+                {tracks.length} {tracks.length === 1 ? 'song' : 'songs'} in library {isArtistLiked && '• Liked Artist'}
               </span>
               <div style={{ display: 'flex', gap: '12px' }}>
                 <button
@@ -352,7 +380,7 @@ export const GenreView: React.FC<GenreViewProps> = ({
         </div>
       </div>
 
-      {/* Track List Below */}
+      {/* Tracks Table */}
       <div 
         className="table-container" 
         style={{ 
@@ -370,7 +398,7 @@ export const GenreView: React.FC<GenreViewProps> = ({
           <div className="empty-state" style={{ textAlign: 'center', padding: '40px 0' }}>
             <Music2 size={48} className="empty-icon" style={{ opacity: 0.5, marginBottom: '12px' }} />
             <h3>No Tracks Found</h3>
-            <p style={{ color: 'var(--text-secondary)' }}>No tracks are available in this genre folder.</p>
+            <p style={{ color: 'var(--text-secondary)' }}>No tracks are available for this artist.</p>
           </div>
         ) : (
           <table className="tracks-table">
@@ -391,7 +419,7 @@ export const GenreView: React.FC<GenreViewProps> = ({
                 const isLiked = likedTracks.includes(track.filePath) ||
                   (!!currentBasename && likedTracks.some(p => p.split(/[\\/]/).pop()?.toLowerCase() === currentBasename));
 
-                const imageKey = `genre-track-${track.filePath}-${idx}`;
+                const imageKey = `artist-track-${track.filePath}-${idx}`;
                 const hasCover = track.coverArt && !failedImages[imageKey];
 
                 return (
@@ -400,12 +428,12 @@ export const GenreView: React.FC<GenreViewProps> = ({
                     className={isActive ? 'playing-row' : ''}
                     onContextMenu={(e) => onTrackContextMenu?.(e, track)}
                   >
-                    {/* Track Number */}
+                    {/* Track Index */}
                     <td style={{ textAlign: 'center', color: 'var(--text-muted)', verticalAlign: 'middle' }}>
                       {idx + 1}
                     </td>
 
-                    {/* Title (Cover Art Thumbnail & Track Name next to it) */}
+                    {/* Title & Cover Art */}
                     <td
                       className="track-title-cell"
                       title={track.filePath}
@@ -453,12 +481,12 @@ export const GenreView: React.FC<GenreViewProps> = ({
                       </div>
                     </td>
 
-                    {/* Artist Category Column */}
+                    {/* Clicking another collaborating artist name jumps to their ArtistView */}
                     <td style={{ verticalAlign: 'middle', color: 'var(--text-secondary)' }}>
                       <ArtistLinks artist={track.artist} onNavigate={onNavigateToArtist} />
                     </td>
 
-                    {/* Like Button & Duration */}
+                    {/* Like Song Button & Duration */}
                     <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: '12px', justifyContent: 'center' }}>
                         <button
@@ -486,7 +514,7 @@ export const GenreView: React.FC<GenreViewProps> = ({
                       </div>
                     </td>
 
-                    {/* Actions: More actions dropdown */}
+                    {/* Actions Context Dropdown */}
                     <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
                       <div style={{ position: 'relative', display: 'inline-block' }}>
                         <button

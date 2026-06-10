@@ -18,6 +18,7 @@ export interface Settings {
   playHistory?: Record<string, number>;
   dailyRecommendations?: { generatedDate: string; tracks: any[] };
   continueListening?: any[];
+  [key: string]: any;
 }
 
 const DEFAULTS: Settings = {
@@ -61,7 +62,16 @@ async function getStore() {
 export async function getSettings(): Promise<Settings> {
   try {
     const store = await getStore();
+    const allStore = (store as any).store || {};
+    const customCovers: Record<string, string> = {};
+    Object.keys(allStore).forEach((key) => {
+      if (key.startsWith('custom-genre-cover-')) {
+        customCovers[key] = allStore[key];
+      }
+    });
+
     return {
+      ...customCovers,
       sourceFolderPath: store.get('sourceFolderPath') as string,
       destinationFolderPath: store.get('destinationFolderPath') as string,
       lastScanDate: store.get('lastScanDate') as string,
@@ -91,6 +101,12 @@ export async function getSettings(): Promise<Settings> {
 export async function saveSettings(settings: Partial<Settings>): Promise<Settings> {
   try {
     const store = await getStore();
+    
+    Object.keys(settings).forEach((key) => {
+      if (key.startsWith('custom-genre-cover-')) {
+        store.set(key, settings[key]);
+      }
+    });
     
     if (settings.sourceFolderPath !== undefined) {
       store.set('sourceFolderPath', settings.sourceFolderPath);

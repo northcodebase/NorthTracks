@@ -1,7 +1,7 @@
 {
   "name": "northtracks",
   "productName": "NorthTracks",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "NorthTracks - Your personal music library manager",
   "author": "NorthCodeBase",
   "main": "dist/main/main.js",
@@ -20,6 +20,7 @@
     "electron-store": "^11.0.2",
     "lucide-react": "^0.395.0",
     "music-metadata": "^11.12.3",
+    "node-id3": "^0.2.9",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
